@@ -13,7 +13,7 @@
  * cosmetic and aren't saved.
  */
 import Phaser from 'phaser'
-import { BEAM_AX, BEAM_AY, BEAM_H, BEAM_W, ROVER_AX, ROVER_AY, ROVER_H, ROVER_SH_H, ROVER_SH_W, ROVER_W, ROVER_WHEEL_FRAMES, roverKey, roverPoint } from '@/game/art/sprites'
+import { BEAM_AX, BEAM_AY, BEAM_H, BEAM_W, ROVER_HALF_LENGTH, ROVER_AX, ROVER_AY, ROVER_H, ROVER_SH_H, ROVER_SH_W, ROVER_W, ROVER_WHEEL_FRAMES, roverKey, roverPoint } from '@/game/art/sprites'
 import { BUILDINGS, MAP, type Dir } from '@/game/core/data'
 import { CORE_AT, type Ent, type Sim } from '@/game/core/sim'
 import { setDep, setTex } from '@/game/render/display'
@@ -658,8 +658,8 @@ export class Units {
       this.dust.push(p)
     }
     // from behind the rear wheels, drifting back and up
-    const bi = -DIR_I[R.dir] * 0.3
-    const bj = -DIR_J[R.dir] * 0.3
+    const bi = -DIR_I[R.dir] * ROVER_HALF_LENGTH
+    const bj = -DIR_J[R.dir] * ROVER_HALF_LENGTH
     const side = (Math.random() - 0.5) * 0.4
     const fi = m.fi + bi + DIR_J[R.dir] * side
     const fj = m.fj + bj - DIR_I[R.dir] * side

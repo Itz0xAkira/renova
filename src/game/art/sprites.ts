@@ -20,7 +20,7 @@ import { lit, outlineOf, shadeLayer, shadowOf } from '@/game/art/passes'
 import { beaconCanvas, beamCanvas, dustCanvas, ROVER_H, ROVER_W, ROVER_WHEEL_FRAMES, roverCanvas, roverShadowCanvas } from '@/game/art/rovers'
 
 export { beltKey, PORT_AX, PORT_AY, PORT_H, PORT_W } from '@/game/art/logistics'
-export { BEAM_AX, BEAM_AY, BEAM_H, BEAM_W, ROVER_AX, ROVER_AY, ROVER_H, ROVER_SH_H, ROVER_SH_W, ROVER_W, ROVER_WHEEL_FRAMES, roverPoint } from '@/game/art/rovers'
+export { BEAM_AX, BEAM_AY, BEAM_H, BEAM_W, ROVER_HALF_LENGTH, ROVER_AX, ROVER_AY, ROVER_H, ROVER_SH_H, ROVER_SH_W, ROVER_W, ROVER_WHEEL_FRAMES, roverPoint } from '@/game/art/rovers'
 
 /** Texture key for a rover frame. */
 export const roverKey = (dir: Dir, frame: number, loaded: boolean) => `rover_${dir}_${frame}${loaded ? '_l' : ''}`
