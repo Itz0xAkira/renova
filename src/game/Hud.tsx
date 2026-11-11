@@ -187,14 +187,14 @@ function TopBar({ store }: { store: GameStore }) {
   const res = RESEARCH.find((r) => r.id === sim.current)
 
   return (
-    <div className="pointer-events-auto flex flex-col gap-1.5 lg:flex-row lg:items-start lg:justify-between">
+    <div className="pointer-events-auto flex flex-col gap-1.5 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-start">
       {/* colony clock and events */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <div className={`${panel} flex items-center gap-2 px-2.5 py-1.5`}>
+      <div className="flex flex-wrap items-center gap-1.5 lg:justify-self-start">
+        <div className={`${panel} flex w-[10.5rem] shrink-0 items-center gap-2 px-2.5 py-1.5 tabular-nums`}>
           <Icon name={sun > 0.05 ? 'sun' : 'moon'} size={22} />
           <span className="leading-tight">
-            <span className="block text-[#C8754D]">RENOVA · Colony 001</span>
-            <span className="block text-xs text-white">
+            <span className="block whitespace-nowrap text-[#C8754D]">Colony 001</span>
+            <span className="block whitespace-nowrap text-xs text-white">
               Sol {String(sim.solNumber()).padStart(3, '0')} · {sim.clock()}
             </span>
           </span>
@@ -212,7 +212,7 @@ function TopBar({ store }: { store: GameStore }) {
       </div>
 
       {/* colony readouts */}
-      <dl className={`${panel} grid grid-cols-4 divide-[#3F4246] sm:grid-cols-8 sm:divide-x`}>
+      <dl className={`${panel} flex flex-wrap divide-x divide-[#3F4246] lg:justify-self-center`}>
         <Stat icon="crew" label="Crew" value={`${sim.colonists}/${housing}`} tone={sim.colonists >= housing ? 'warn' : undefined} hint="Colonists / beds" />
         <Stat icon="heart" label="Health" value={`${Math.round(sim.health)}%`} tone={sim.health < 50 ? 'bad' : undefined} bar={[sim.health / 100, sim.health < 50 ? '#D86B7B' : '#7BA750']} />
         <Stat
@@ -220,6 +220,7 @@ function TopBar({ store }: { store: GameStore }) {
           label="Power"
           value={`${Math.round(P.gen)}/${Math.round(P.demand)}`}
           unit="kW"
+          wide
           tone={sim.shortages.has('power') ? 'bad' : undefined}
           bar={[P.stored / reserve, '#65C9E8']}
           hint={`Generation / demand. Batteries: ${fmt(P.stored)} of ${fmt(reserve)} kJ`}
@@ -232,7 +233,7 @@ function TopBar({ store }: { store: GameStore }) {
       </dl>
 
       {/* controls */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 lg:justify-self-end">
         <button type="button" className={`${btn} ${ui.paused ? btnOn : ''}`} onClick={() => store.togglePause()} aria-label={ui.paused ? 'Resume' : 'Pause'} title="Pause · Space">
           <Icon name={ui.paused ? 'play' : 'pause'} />
         </button>
@@ -243,7 +244,7 @@ function TopBar({ store }: { store: GameStore }) {
             </button>
           ))}
         </div>
-        <button type="button" className={`${btn} min-w-[7rem]`} onClick={() => store.setPanel('research')} title="Research · T">
+        <button type="button" className={`${btn} w-[7.5rem] shrink-0`} onClick={() => store.setPanel('research')} title="Research · T">
           <Icon name="research" />
           <span className="flex-1 text-left leading-tight">
             <span className="block">Research</span>
@@ -270,6 +271,7 @@ function Stat({
   bar,
   sub,
   hint,
+  wide,
 }: {
   icon: IconName
   label: string
@@ -279,17 +281,20 @@ function Stat({
   bar?: [number, string]
   sub?: ReactNode
   hint?: string
+  /** For readouts that hold two numbers, like power. */
+  wide?: boolean
 }) {
+  // Fixed widths and tabular figures: the bar never shifts as values change.
   return (
-    <div className="flex min-w-[4.9rem] items-center gap-1.5 px-2 py-1" title={hint ?? label}>
+    <div className={`flex shrink-0 items-center gap-1.5 overflow-hidden px-2 py-1 ${wide ? 'w-[7.25rem]' : 'w-[5.4rem]'}`} title={hint ?? label}>
       <Icon name={icon} size={18} />
       <div className="min-w-0 flex-1 leading-tight">
         <dt className="sr-only">{label}</dt>
-        <dd className={`text-xs sm:text-[13px] ${tone ? TONE[tone] : 'text-white'}`}>
+        <dd className={`whitespace-nowrap text-xs tabular-nums sm:text-[13px] ${tone ? TONE[tone] : 'text-white'}`}>
           {value}
           {unit && <span className="ml-0.5 text-[8px] text-[#8A8A8A]">{unit}</span>}
         </dd>
-        {bar ? <Bar value={bar[0]} color={bar[1]} className="mt-0.5" /> : <span className="block text-[8px]">{sub ?? <span className={TONE.label}>{label}</span>}</span>}
+        {bar ? <Bar value={bar[0]} color={bar[1]} className="mt-0.5" /> : <span className="block whitespace-nowrap text-[8px] tabular-nums">{sub ?? <span className={TONE.label}>{label}</span>}</span>}
       </div>
     </div>
   )
