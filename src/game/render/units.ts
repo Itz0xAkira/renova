@@ -10,13 +10,21 @@
  * cosmetic and aren't saved.
  */
 import Phaser from 'phaser'
-import { TER_OX, TER_OY } from '@/game/art/sprites'
 import { BUILDINGS, MAP } from '@/game/core/data'
-import { CORE_AT, type Sim } from '@/game/core/sim'
+import { CORE_AT, type Ent, type Sim } from '@/game/core/sim'
+import { setDep, setTex } from '@/game/render/display'
+import { centreX, centreY, DEPTH, unitDepth } from '@/game/render/iso'
 
-const world = (fi: number, fj: number) => [TER_OX + (fi - fj) * 16, TER_OY + (fi + fj) * 8 + 8] as const
+/** Ground point under the middle of a building's footprint. */
+function footCentre(e: Ent) {
+  const fi = e.i + (BUILDINGS[e.kind].w - 1) / 2
+  const fj = e.j + (BUILDINGS[e.kind].h - 1) / 2
+  return [centreX(fi, fj), centreY(fi, fj)] as const
+}
 
-const AIR = 2e6 // drones fly above everything
+/** Where drones live: the centre of the core's 2×2 footprint. */
+const HOME_X = centreX(CORE_AT + 0.5, CORE_AT + 0.5)
+const HOME_Y = centreY(CORE_AT + 0.5, CORE_AT + 0.5)
 
 /** Drone landing pads on the core's back sub-tile, as offsets from its footprint centre (ground px), on a 6 px plinth. */
 const DRONE_PADS: [number, number][] = [
@@ -24,6 +32,8 @@ const DRONE_PADS: [number, number][] = [
   [7, -8],
 ]
 const PAD_ALT = 6 + 3
+const ROVER_FRAMES = ['rover_0', 'rover_1']
+const WALKER_FRAMES = ['walker_0', 'walker_1']
 
 /** Rover charging bays: the open tiles along the core's two front edges. */
 export const ROVER_BAYS: [number, number][] = [
@@ -82,20 +92,20 @@ export class Units {
 
   constructor(private scene: Phaser.Scene) {}
 
-  private get home() {
-    return world(CORE_AT + 0.5, CORE_AT + 0.5)
-  }
-
   reset(sim: Sim) {
-    for (const d of this.drones) {
-      d.img.destroy()
-      d.sh.destroy()
+    for (const u of this.drones) {
+      u.img.destroy()
+      u.sh.destroy()
     }
-    for (const m of [...this.rovers, ...this.crew]) {
-      m.img.destroy()
-      m.sh.destroy()
+    for (const list of [this.rovers, this.crew])
+      for (const u of list) {
+        u.img.destroy()
+        u.sh.destroy()
+      }
+    for (const s of this.sparks) {
+      this.scene.tweens.killTweensOf(s)
+      s.destroy()
     }
-    for (const s of this.sparks) s.destroy()
     this.drones = []
     this.rovers = []
     this.crew = []
@@ -111,7 +121,7 @@ export class Units {
     for (const e of sim.ents.values()) {
       if (this.known.has(e.id)) continue
       this.known.add(e.id)
-      const [x, y] = world(e.i, e.j)
+      const [x, y] = footCentre(e)
       this.queue({ x, y: y - 6 })
     }
     for (const id of this.known) if (!sim.ents.has(id)) this.known.delete(id)
@@ -131,42 +141,43 @@ export class Units {
     while (sim.justUpgraded.length) {
       const e = sim.ents.get(sim.justUpgraded.shift()!)
       if (!e) continue
-      const [x, y] = world(e.i + (BUILDINGS[e.kind].w - 1) / 2, e.j + (BUILDINGS[e.kind].h - 1) / 2)
+      const [x, y] = footCentre(e)
       this.queue({ x, y: y - 10 })
     }
     while (sim.newRoads.length) {
       const k = sim.newRoads.shift()!
-      const [x, y] = world(k % MAP, Math.floor(k / MAP))
-      this.queue({ x, y: y - 2, pave: true })
+      const i = k % MAP
+      const j = Math.floor(k / MAP)
+      this.queue({ x: centreX(i, j), y: centreY(i, j) - 2, pave: true })
     }
     this.ensureDrones(Math.min(6, 2 + Math.floor(buildings / 8)))
     this.ensureMovers(sim, this.rovers, Math.min(4, 1 + Math.floor(buildings / 5)), 'rover')
-    // crew go out by day in fair weather; at night and in flares they head inside
-    const outside = env.daytime && !env.flare ? Math.min(10, Math.max(1, Math.floor(sim.colonists * 0.4)) - (env.storm ? 1 : 0)) : 0
+    // crew go out by day in fair weather; at night, in flares and with nobody left they stay inside
+    const outside = sim.colonists > 0 && env.daytime && !env.flare ? Math.min(10, Math.max(1, Math.floor(sim.colonists * 0.4)) - (env.storm ? 1 : 0)) : 0
     this.ensureMovers(sim, this.crew, outside, 'walker')
     this.updateDrones(dt, realDt, env)
     for (const r of this.rovers) this.step(sim, r, dt, ROVER_SPEED, 'rover', env)
     for (const w of this.crew) this.step(sim, w, dt, WALK_SPEED, 'walker', env)
     // walkers who've reached the core at the end of their shift go inside
-    this.crew = this.crew.filter((w) => {
-      const done = w.leaving && !w.path.length && w.wait <= 0
-      if (done) {
-        w.img.destroy()
-        w.sh.destroy()
-      }
-      return !done
-    })
+    for (let k = this.crew.length - 1; k >= 0; k--) {
+      const w = this.crew[k]
+      if (!w.leaving || w.path.length || w.wait > 0) continue
+      w.img.destroy()
+      w.sh.destroy()
+      this.crew.splice(k, 1)
+    }
   }
 
   /* -------------------------------- drones -------------------------------- */
 
   private ensureDrones(n: number) {
-    const [hx, hy] = this.home
+    const hx = HOME_X
+    const hy = HOME_Y
     while (this.drones.length < n) {
       const k = this.drones.length
       this.drones.push({
-        img: this.scene.add.image(hx, hy, 'drone_0').setOrigin(11 / 22, 11 / 14).setDepth(AIR),
-        sh: this.scene.add.image(hx, hy, 'drone_shadow').setDepth(-0.7),
+        img: this.scene.add.image(hx, hy, 'drone_0').setOrigin(11 / 22, 11 / 14).setDepth(DEPTH.air),
+        sh: this.scene.add.image(hx, hy, 'drone_shadow').setDepth(DEPTH.unitShadow),
         x: hx,
         y: hy,
         alt: DRONE_ALT + 10,
@@ -179,11 +190,14 @@ export class Units {
   }
 
   private updateDrones(dt: number, realDt: number, env: Env) {
-    const [hx, hy] = this.home
-    for (const d of this.drones) {
+    const hx = HOME_X
+    const hy = HOME_Y
+    const frame = `drone_${Math.floor(this.time * 20) % 2}`
+    for (let n = 0; n < this.drones.length; n++) {
+      const d = this.drones[n]
       if (d.state === 'idle') {
         const job = this.jobs.shift()
-        const pad = DRONE_PADS[this.drones.indexOf(d)]
+        const pad = DRONE_PADS[n]
         if (job) {
           d.job = job
           d.state = 'go'
@@ -235,7 +249,7 @@ export class Units {
           d.job = null
         }
       }
-      d.img.setTexture(`drone_${Math.floor(this.time * 20) % 2}`).setPosition(Math.round(d.x), Math.round(d.y - d.alt))
+      setTex(d.img, frame).setPosition(Math.round(d.x), Math.round(d.y - d.alt))
       // the higher the drone, the further and fainter its shadow
       d.sh
         .setPosition(Math.round(d.x + d.alt * SHADOW_DX), Math.round(d.y + d.alt * SHADOW_DY))
@@ -244,7 +258,7 @@ export class Units {
   }
 
   private spark(x: number, y: number) {
-    const s = this.scene.add.image(x + (Math.random() - 0.5) * 10, y, 'spark').setDepth(AIR - 1)
+    const s = this.scene.add.image(x + (Math.random() - 0.5) * 10, y, 'spark').setDepth(DEPTH.air - 1)
     this.sparks.push(s)
     this.scene.tweens.add({
       targets: s,
@@ -253,7 +267,8 @@ export class Units {
       duration: 380,
       onComplete: () => {
         s.destroy()
-        this.sparks = this.sparks.filter((x) => x !== s)
+        const k = this.sparks.indexOf(s)
+        if (k >= 0) this.sparks.splice(k, 1)
       },
     })
   }
@@ -339,14 +354,16 @@ export class Units {
   private ensureMovers(sim: Sim, list: Mover[], n: number, kind: 'rover' | 'walker') {
     // too many walkers: the newest ones end their shift
     if (kind === 'walker') {
-      let active = list.filter((w) => !w.leaving)
-      while (active.length > n) {
-        const w = active[active.length - 1]
+      let active = 0
+      for (const w of list) if (!w.leaving) active++
+      for (let k = list.length - 1; k >= 0 && active > n; k--) {
+        const w = list[k]
+        if (w.leaving) continue
         w.leaving = true
         w.toCore = true
         w.path = []
         w.wait = 0.2 + Math.random()
-        active = active.slice(0, -1)
+        active--
       }
       n = Math.max(n, list.length) // the leavers are still on their way
     }
@@ -357,7 +374,7 @@ export class Units {
       const rover = kind === 'rover'
       list.push({
         img: this.scene.add.image(0, 0, rover ? 'rover_0' : 'walker_0').setOrigin(rover ? 11 / 22 : 6 / 12, rover ? 19 / 22 : 13 / 15),
-        sh: this.scene.add.image(0, 0, rover ? 'rover_sh' : 'walker_sh').setOrigin(rover ? 11 / 36 : 6 / 22, rover ? 19 / 30 : 13 / 20).setDepth(-0.7),
+        sh: this.scene.add.image(0, 0, rover ? 'rover_sh' : 'walker_sh').setOrigin(rover ? 11 / 36 : 6 / 22, rover ? 19 / 30 : 13 / 20).setDepth(DEPTH.unitShadow),
         fi: s % MAP,
         fj: Math.floor(s / MAP),
         path: [],
@@ -433,14 +450,13 @@ export class Units {
         if (dist > 0.01) m.img.setFlipX(di - dj < 0)
       }
     }
-    const [x, y] = world(m.fi, m.fj)
+    const x = Math.round(centreX(m.fi, m.fj))
+    const y = Math.round(centreY(m.fi, m.fj))
     const moving = m.path.length > 0 && dt > 0
     const frame = moving ? Math.floor(this.time * (rover ? 8 : 5)) % 2 : 0
-    m.img
-      .setTexture(`${rover ? 'rover' : 'walker'}_${frame}`)
-      .setPosition(Math.round(x), Math.round(y))
-      .setDepth((m.fi + m.fj) * 10 + 4)
-    m.sh.setPosition(Math.round(x), Math.round(y)).setAlpha(env.shadowAlpha)
+    setTex(m.img, rover ? ROVER_FRAMES[frame] : WALKER_FRAMES[frame]).setPosition(x, y)
+    setDep(m.img, unitDepth(m.fi, m.fj))
+    m.sh.setPosition(x, y).setAlpha(env.shadowAlpha)
   }
 
   private atCore(m: Mover) {

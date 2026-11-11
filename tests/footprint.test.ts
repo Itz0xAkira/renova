@@ -25,7 +25,7 @@ if (t.delivered.metal < 3) throw new Error(`metal from 2×2 smelter: ${t.deliver
 if (BUILDINGS.habitat.housing !== 6 || !t.unlocked('greenhouse') || !t.unlocked('washer')) throw new Error('unlocks/housing')
 // an old save whose building no longer fits is refunded, not overlapped
 const save = t.save()
-save.ents.push(['lab', c - 2, c + 6, 0])
+save.ents.push({ k: 'lab', i: c - 2, j: c + 6, d: 0 })
 const back = Sim.load(save)
 if ([...back.ents.values()].some((e) => e.kind === 'lab')) throw new Error('overlapping lab loaded')
 console.log('OK footprints · metal from 2×2 smelter:', t.delivered.metal)

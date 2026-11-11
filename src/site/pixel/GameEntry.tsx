@@ -36,6 +36,9 @@ export function GameEntry({ open, onClose }: { open: boolean; onClose: () => voi
     } else root.style.overflow = 'hidden'
   }, [phase])
 
+  // leaving the page mid-animation must not leave the site unscrollable
+  useEffect(() => () => void (document.documentElement.style.overflow = ''), [])
+
   useEffect(() => {
     if (phase === 'closed' || phase === 'open') return
     const canvas = cv.current

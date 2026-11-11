@@ -23,13 +23,13 @@ if (s.links.length < 2) throw new Error('expected cable links')
 // life support is served first: with too little power the crew module runs, industry starves
 const t = new Sim(42)
 t.time = 14 + 120 * 0.5 // night: no solar at all
-t.power.stored = 0
+t.reserve = 0
 t.stock.metal = 999
 t.stock.brick = 999
 for (let j = 0; j < MAP; j++) for (let i = 0; i < MAP; i++) t.ground[j * MAP + i] = 'sand'
 must(t.place('moxie', c - 3, c, 0), 'moxie')
 must(t.place('lab', c + 3, c + 3, 0), 'lab')
-t.power.stored = 2 // a trickle of stored power
+t.reserve = 2 // a trickle of stored power
 t.step(0.05)
 if (!(t.power.lifeSat > t.power.indSat)) throw new Error(`priority: life ${t.power.lifeSat} ind ${t.power.indSat}`)
 // upgrades: a solar panel becomes an array, then a station that plants panels

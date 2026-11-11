@@ -1,0 +1,336 @@
+/**
+ * Map input for the scene: camera pan / zoom (keys, wheel, drag, pinch) and the
+ * pointer tools — place, drag-to-build belts (with junctions where a line runs
+ * straight across another), right-click remove, and click to select.
+ *
+ * Everything here is ignored while `store.ui.inputBlocked` is set (a panel,
+ * popup or the guide covers the map).
+ */
+import type Phaser from 'phaser'
+import { BUILDINGS, type Dir } from '@/game/core/data'
+import { CORE_AT } from '@/game/core/sim'
+import type { GameStore } from '@/game/store'
+import { anchorFor, stepDir, tileAtWorld, top, type Tile } from '@/game/render/iso'
+
+const ZOOMS = [1, 2, 3, 4, 5, 6]
+/** Screen px a press may wander before it counts as a drag. */
+const DRAG_SLOP = 6
+const PAN_SPEED = 420
+
+type Drag = {
+  mode: 'place' | 'remove' | 'pan'
+  /** Last map tile the drag acted on (null until it enters the map). */
+  last: Tile | null
+  sx: number
+  sy: number
+  scrollX: number
+  scrollY: number
+  moved: boolean
+  /** Entities built during this drag. */
+  placed: Set<number>
+  /** Touch: the first tile, placed only once the finger moves or lifts (a second finger cancels it). */
+  pending: Tile | null
+  /** A perpendicular belt the drag entered, with the direction it entered in: it becomes a junction only if the drag leaves straight out the far side. */
+  crossing: { i: number; j: number; dir: Dir } | null
+}
+
+export class MapInput {
+  private drag: Drag | null = null
+  private pinch: null | { d: number; zoom: number } = null
+  private keys!: Record<string, Phaser.Input.Keyboard.Key>
+  /** A mouse is over the canvas (set by moves, cleared when it leaves). */
+  private mouseOver = false
+
+  constructor(
+    private scene: Phaser.Scene,
+    private store: GameStore,
+  ) {}
+
+  attach() {
+    const input = this.scene.input
+    this.keys = input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT', false) as Record<string, Phaser.Input.Keyboard.Key>
+    input.addPointer(1)
+    input.mouse?.disableContextMenu()
+    input.on('pointerdown', this.onDown, this)
+    input.on('pointermove', this.onMove, this)
+    input.on('pointerup', this.onUp, this)
+    input.on('pointerupoutside', this.onUp, this)
+    input.on('gameout', this.onOut, this)
+    input.on('wheel', this.onWheel, this)
+  }
+
+  private get blocked() {
+    return this.store.ui.inputBlocked
+  }
+
+  /** Forget any gesture in progress (new game, blocked input). */
+  cancel() {
+    this.drag = null
+    this.pinch = null
+  }
+
+  /* -------------------------------- camera -------------------------------- */
+
+  centerOnCore() {
+    const [x, y] = top(CORE_AT, CORE_AT)
+    this.scene.cameras.main.centerOn(x, y + 16)
+  }
+
+  zoomBy(step: number, sx = this.scene.scale.width / 2, sy = this.scene.scale.height / 2) {
+    const cam = this.scene.cameras.main
+    const k = ZOOMS.indexOf(this.store.ui.zoom)
+    const next = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, (k < 0 ? 2 : k) + step))]
+    if (next === cam.zoom) return
+    const before = cam.getWorldPoint(sx, sy)
+    cam.setZoom(next)
+    cam.preRender()
+    const after = cam.getWorldPoint(sx, sy)
+    cam.scrollX += before.x - after.x
+    cam.scrollY += before.y - after.y
+    // a pan in progress continues from the new view
+    const d = this.drag
+    if (d && d.mode === 'pan') {
+      d.scrollX = cam.scrollX
+      d.scrollY = cam.scrollY
+      const p = this.scene.input.activePointer
+      d.sx = p.x
+      d.sy = p.y
+    }
+    this.store.ui.zoom = next
+    this.store.bump()
+  }
+
+  tileAt(sx: number, sy: number): Tile | null {
+    const p = this.scene.cameras.main.getWorldPoint(sx, sy)
+    return tileAtWorld(p.x, p.y)
+  }
+
+  /** Per frame: HUD camera requests, keyboard panning, and keeping the hover tile under a still mouse. */
+  update(delta: number) {
+    const store = this.store
+    const ui = store.ui
+    if (store.centerRequest) {
+      store.centerRequest = false
+      this.centerOnCore()
+    }
+    if (store.zoomRequest) {
+      this.zoomBy(store.zoomRequest)
+      store.zoomRequest = 0
+    }
+    if (this.blocked) {
+      this.cancel()
+      if (ui.hover) ui.hover = null
+      if (ui.pointer) ui.pointer = null
+      return
+    }
+    const cam = this.scene.cameras.main
+    const v = (delta / 1000) * (PAN_SPEED / cam.zoom)
+    const k = this.keys
+    if (k.A.isDown || k.LEFT.isDown) cam.scrollX -= v
+    if (k.D.isDown || k.RIGHT.isDown) cam.scrollX += v
+    if (k.W.isDown || k.UP.isDown) cam.scrollY -= v
+    if (k.S.isDown || k.DOWN.isDown) cam.scrollY += v
+    // the camera may have moved under the pointer (keys, zoom): re-pick the tile
+    const p = this.scene.input.activePointer
+    if (p.wasTouch ? p.isDown : this.mouseOver) this.setHover(this.tileAt(p.x, p.y))
+  }
+
+  private setHover(t: Tile | null) {
+    const h = this.store.ui.hover
+    if (h === t || (h && t && h[0] === t[0] && h[1] === t[1])) return
+    this.store.ui.hover = t
+  }
+
+  /* -------------------------------- pointer ------------------------------- */
+
+  private onOut() {
+    this.mouseOver = false
+    this.store.ui.hover = null
+    this.store.ui.pointer = null
+  }
+
+  private onWheel(p: Phaser.Input.Pointer, _o: unknown, _dx: number, dy: number) {
+    if (this.blocked) return
+    this.zoomBy(dy > 0 ? -1 : 1, p.x, p.y)
+  }
+
+  private onDown(p: Phaser.Input.Pointer) {
+    if (this.blocked) return this.cancel()
+    if (!p.wasTouch) this.mouseOver = true
+    const pts = this.scene.input.manager.pointers.filter((q) => q.isDown)
+    if (pts.length >= 2) {
+      // a second finger: this is a pinch, and whatever the first finger started is dropped
+      this.drag = null
+      this.pinch = { d: Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y), zoom: this.store.ui.zoom }
+      return
+    }
+    const cam = this.scene.cameras.main
+    const t = this.tileAt(p.x, p.y)
+    const base = { sx: p.x, sy: p.y, scrollX: cam.scrollX, scrollY: cam.scrollY, moved: false, last: t, placed: new Set<number>(), pending: null, crossing: null }
+    if (p.rightButtonDown()) {
+      this.drag = { mode: 'remove', ...base }
+      if (t) this.store.removeAt(t[0], t[1])
+    } else if (p.middleButtonDown() || !this.store.ui.tool) {
+      this.drag = { mode: 'pan', ...base }
+    } else if (p.wasTouch) {
+      // wait: this may be the first finger of a pinch
+      this.drag = { mode: 'place', ...base, pending: t }
+    } else {
+      this.drag = { mode: 'place', ...base }
+      if (t) this.placeAt(t[0], t[1])
+    }
+  }
+
+  private onMove(p: Phaser.Input.Pointer) {
+    if (this.blocked) return
+    if (!p.wasTouch) this.mouseOver = true
+    const t = this.tileAt(p.x, p.y)
+    this.setHover(t)
+    this.store.ui.pointer = [p.x, p.y]
+    if (this.pinch) {
+      const pts = this.scene.input.manager.pointers.filter((q) => q.isDown)
+      if (pts.length >= 2) {
+        const d = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+        const want = this.pinch.zoom * (d / this.pinch.d)
+        const k = ZOOMS.reduce((best, z) => (Math.abs(z - want) < Math.abs(best - want) ? z : best), ZOOMS[0])
+        if (k !== this.store.ui.zoom) this.zoomBy(ZOOMS.indexOf(k) - ZOOMS.indexOf(this.store.ui.zoom), (pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2)
+      }
+      return
+    }
+    const d = this.drag
+    if (!d || !p.isDown) return
+    if (!d.moved && Math.abs(p.x - d.sx) + Math.abs(p.y - d.sy) > DRAG_SLOP) d.moved = true
+    if (d.mode === 'pan') {
+      const cam = this.scene.cameras.main
+      cam.scrollX = d.scrollX - (p.x - d.sx) / cam.zoom
+      cam.scrollY = d.scrollY - (p.y - d.sy) / cam.zoom
+      return
+    }
+    if (d.pending) {
+      if (!d.moved) return
+      const [pi, pj] = d.pending
+      d.pending = null
+      this.placeAt(pi, pj)
+    }
+    if (!t) return
+    if (!d.last) {
+      // the drag has just come onto the map: this tile is its first
+      d.last = t
+      if (d.mode === 'remove') this.store.removeAt(t[0], t[1])
+      else this.placeAt(t[0], t[1])
+      return
+    }
+    if (d.last[0] === t[0] && d.last[1] === t[1]) return
+    // walk the grid from the last tile to this one so fast drags leave no gaps
+    let [ci, cj] = d.last
+    while (ci !== t[0] || cj !== t[1]) {
+      const pi = ci
+      const pj = cj
+      if (ci !== t[0]) ci += Math.sign(t[0] - ci)
+      else cj += Math.sign(t[1] - cj)
+      if (d.mode === 'remove') this.store.removeAt(ci, cj)
+      else this.stepPlace(pi, pj, ci, cj)
+    }
+    d.last = t
+  }
+
+  private onUp(p: Phaser.Input.Pointer) {
+    const d = this.drag
+    this.cancel()
+    if (!d || this.blocked) return
+    // a touch tap places on release
+    if (d.pending) return this.placeAt(d.pending[0], d.pending[1])
+    if (d.moved || d.mode !== 'pan' || p.button !== 0) return
+    // a click without a tool selects
+    const t = this.tileAt(p.x, p.y)
+    const e = t ? this.store.sim.entAt(t[0], t[1]) : null
+    this.store.ui.selected = e ? e.id : null
+    this.store.bump()
+  }
+
+  /* ------------------------------- building ------------------------------- */
+
+  /** One grid step of a placing drag, from (pi, pj) onto the neighbouring (ci, cj). */
+  private stepPlace(pi: number, pj: number, ci: number, cj: number) {
+    const d = this.drag!
+    const sim = this.store.sim
+    if (this.store.ui.tool === 'belt') {
+      const dir = stepDir(pi, pj, ci, cj)
+      // leaving a perpendicular belt straight out the far side: the lines cross, so it becomes a junction.
+      // Turning on it instead (or stopping there) leaves it alone, which is a merge.
+      const c = d.crossing
+      d.crossing = null
+      if (c && c.i === pi && c.j === pj && c.dir === dir) this.makeJunction(pi, pj)
+      this.store.ui.dir = dir
+      const prev = sim.entAt(pi, pj)
+      if (prev && prev.kind === 'belt' && d.placed.has(prev.id)) sim.setDir(prev, dir)
+      this.placeAt(ci, cj, dir)
+      return
+    }
+    this.placeAt(ci, cj)
+  }
+
+  /** Build the current tool with the cursor over (hi, hj). `entry` is the drag's direction onto this tile. */
+  private placeAt(hi: number, hj: number, entry?: Dir) {
+    const tool = this.store.ui.tool
+    if (!tool) return
+    const [i, j] = anchorFor(tool, hi, hj)
+    const sim = this.store.sim
+    const there = sim.entAt(i, j)
+    if (tool === 'belt' && there) {
+      if (there.kind === 'junction') return // run straight through existing junctions
+      if (there.kind === 'belt') {
+        // someone else's belt: maybe a crossing, decided when the drag leaves the tile
+        if (this.drag && entry !== undefined && !this.drag.placed.has(there.id) && there.dir % 2 !== entry % 2) this.drag.crossing = { i, j, dir: entry }
+        return
+      }
+    }
+    const err = sim.place(tool, i, j, this.store.ui.dir)
+    if (!err) {
+      const e = sim.entAt(i, j)
+      if (e) this.drag?.placed.add(e.id)
+      this.store.bump()
+    } else if (err === 'Not enough materials' || err === 'Not researched yet') {
+      sim.log(`${BUILDINGS[tool].name}: ${err.toLowerCase()}.`, 'warn')
+      this.store.bump()
+    }
+  }
+
+  /**
+   * Swap the belt at (i, j) for a junction, carrying its items over onto the
+   * junction's lane in the belt's direction. Checks first that a junction can be
+   * built (counting the belt's refund), so nothing is removed when it can't.
+   * TODO(core): this belongs in the sim as one atomic action.
+   */
+  private makeJunction(i: number, j: number) {
+    const sim = this.store.sim
+    const belt = sim.entAt(i, j)
+    if (!belt || belt.kind !== 'belt') return
+    const name = BUILDINGS.junction.name
+    if (!sim.unlocked('junction')) {
+      sim.log(`${name}: not researched yet.`, 'warn')
+      return this.store.bump()
+    }
+    const jc = BUILDINGS.junction.cost
+    const bc = BUILDINGS.belt.cost
+    if (sim.stock.metal + (bc.metal ?? 0) < (jc.metal ?? 0) || sim.stock.brick + (bc.brick ?? 0) < (jc.brick ?? 0)) {
+      sim.log(`${name}: not enough materials.`, 'warn')
+      return this.store.bump()
+    }
+    sim.remove(i, j)
+    if (this.store.ui.selected === belt.id) this.store.ui.selected = null
+    const err = sim.place('junction', i, j, 0)
+    const now = sim.entAt(i, j)
+    if (err || !now) {
+      // put the belt back as it was
+      sim.place('belt', i, j, belt.dir)
+      const back = sim.entAt(i, j)
+      if (back && back.kind === 'belt') back.items = belt.items
+      if (err) sim.log(`${name}: ${err.toLowerCase()}.`, 'warn')
+    } else {
+      now.lanes[belt.dir] = belt.items.map((it) => ({ item: it.item, pos: it.pos }))
+      this.drag?.placed.add(now.id)
+    }
+    this.store.bump()
+  }
+}

@@ -1,77 +1,73 @@
+/**
+ * The Phaser scene: steps the simulation on a fixed clock and keeps the world's
+ * sprites in step with it. Input lives in `input.ts`, the cursor and power
+ * overlays in `overlays.ts`, colony units in `units.ts` and the shared
+ * isometric maths and draw order in `iso.ts`.
+ */
 import Phaser from 'phaser'
-import { ANIMATED, bakeAll, bakeTier, beltKey, bKey, isBig, shKey, PORT_AX, PORT_AY, PORT_H, PORT_W, CORE_AX, CORE_AY, CORE_H, CORE_W, FRAMES, slabKey, SPR_AX, SPR_AY, SPR_H, SPR_W, TER_H, TER_OX, TER_OY, TER_W, terrainCanvas } from '@/game/art/sprites'
-import { BUILDINGS, DI, DJ, MAP, type Dir, type Kind } from '@/game/core/data'
-import { CORE_AT, outTile, outTileFor, type Ent } from '@/game/core/sim'
-import { PYLON_LINK, PYLON_REACH, SHIELD_REACH } from '@/game/core/data'
-import { PYLON_TOP } from '@/game/art/structures'
+import { bakeAll, bakeTier, beltKey, bKey, FRAMES, isBig, PORT_AX, PORT_AY, PORT_H, PORT_W, CORE_AX, CORE_AY, shKey, SPR_AX, SPR_AY, TER_H, TER_W, terrainCanvas, type TextureSink } from '@/game/art/sprites'
+import { BUILDINGS, DI, DJ, ITEMS, MAP, type Dir, type ItemId, type Kind } from '@/game/core/data'
+import { CORE_AT, outTile, type Ent } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
+import { setDep, setTex } from '@/game/render/display'
+import { MapInput } from '@/game/render/input'
+import { centreOf, centreX, centreY, DEPTH, depthFor, DIR_VEC, itemDepth, JUNCTION_ORIGIN, originOf, ROW, SLOT, top } from '@/game/render/iso'
+import { Overlays } from '@/game/render/overlays'
 import { ROVER_BAYS, Units } from '@/game/render/units'
 
 const STEP = 1 / 20
-const ZOOMS = [1, 2, 3, 4, 5, 6]
 
-/** World position of tile (i, j)'s top corner. Fractional (i, j) give any point on the ground. */
-const top = (i: number, j: number) => [TER_OX + (i - j) * 16, TER_OY + (i + j) * 8] as const
+/** Kinds that show their running frames whenever they exist; every other building animates only while it works. */
+const ALWAYS_ON = new Set<Kind>(['solar', 'core', 'battery', 'reactor', 'pylon'])
 
-/** Ground point at the centre of a building's footprint, where its sprite is anchored. */
-const centreOf = (kind: Kind, i: number, j: number) => top(i + BUILDINGS[kind].w / 2, j + BUILDINGS[kind].h / 2)
+/** Statuses that put an icon over the building. */
+const ICON_STATUS = new Set(['nopower', 'nogrid', 'noinput', 'blocked', 'unshielded', 'badground'])
 
-/**
- * Draw order. 1×1: by its tile's row (i + j). Multi-tile: between the last row
- * behind it and the first row in front of it, so neighbours on every side sort
- * correctly for 2×2 and 3×2 footprints.
- */
-const depthFor = (kind: Kind, i: number, j: number) => {
-  const { w, h } = BUILDINGS[kind]
-  return w === 1 && h === 1 ? (i + j) * 10 + 5 : (i + j + Math.max(w, h) - 2) * 10 + 6
-}
+const ITEM_KEY = Object.fromEntries(Object.keys(ITEMS).map((k) => [k, `item_${k}`])) as Record<ItemId, string>
 
-const originOf = (kind: Kind) => (isBig(kind) ? [CORE_AX / CORE_W, CORE_AY / CORE_H] : [SPR_AX / SPR_W, SPR_AY / SPR_H]) as [number, number]
+/** The supply ship lands on the open front sub-tile of the core's pad, so it sorts just in front of the core. */
+const SHIP_DEPTH = (CORE_AT * 2 + 1) * ROW + SLOT.ship
 
-/** The cursor sits over the middle of a multi-tile footprint: its top-corner tile. */
-const anchorFor = (kind: Kind, hi: number, hj: number) => [hi - ((BUILDINGS[kind].w - 1) >> 1), hj - ((BUILDINGS[kind].h - 1) >> 1)] as const
+/** Stamp settings for batched draws into a render texture (inside beginDraw / endDraw). */
+const IN_BATCH = { skipBatch: true }
+const BAY_STAMP = { originX: 17 / 34, originY: 21 / 30, skipBatch: true }
+const SHADOW_STAMP = { originX: 0, originY: 0, skipBatch: true }
+
+type Port = { img: Phaser.GameObjects.Image; owner: number; kind: 'in' | 'out'; dir: Dir }
 
 export class MarsScene extends Phaser.Scene {
   private store: GameStore
   private sprites = new Map<number, Phaser.GameObjects.Image>()
   private icons = new Map<number, Phaser.GameObjects.Image>()
-  private slabs = new Map<number, Phaser.GameObjects.Image>()
-  /** Belt docks and output chutes on building edges, rebuilt whenever the layout changes. */
-  private ports: { img: Phaser.GameObjects.Image; owner: number; kind: 'in' | 'out'; dir: Dir }[] = []
+  /** Belt docks and output chutes on building edges, rebuilt when the set of them changes. */
+  private ports: Port[] = []
+  private portsKey = ''
   private units!: Units
+  private controls!: MapInput
+  private overlays!: Overlays
   /** Tyre tracks and roads worn in by rovers and crew. */
-  private roads?: Phaser.GameObjects.RenderTexture
+  private roads!: Phaser.GameObjects.RenderTexture
   private roadRev = -1
+  /** Which rover bays had something built on them when the roads were last drawn. */
+  private baysKey = ''
   /** All building shadows, stamped opaque and faded as one layer so overlaps never stack. */
-  private shadows?: Phaser.GameObjects.RenderTexture
+  private shadows!: Phaser.GameObjects.RenderTexture
   private items: Phaser.GameObjects.Image[] = []
   private terrain?: Phaser.GameObjects.Image
-  private hover!: Phaser.GameObjects.Image
-  private ghost!: Phaser.GameObjects.Image
-  private ghostArrow!: Phaser.GameObjects.Image
-  private range!: Phaser.GameObjects.Graphics
+  private terrainKey = ''
   private ship!: Phaser.GameObjects.Image
   private flame!: Phaser.GameObjects.Image
-  private keys!: Record<string, Phaser.Input.Keyboard.Key>
+  private shipChain?: Phaser.Tweens.TweenChain
   private acc = 0
   private rev = -1
   private epoch = -1
   private lastShip = -1
   private lastBump = 0
-  private rangeKey = ''
-  /** Footprint outlines under the cursor. */
-  private foot!: Phaser.GameObjects.Graphics
-  /** Power cables strung between the core and pylons. */
-  private cables!: Phaser.GameObjects.Graphics
-  /** Grid coverage, shown in the power view and while placing power-related buildings. */
-  private coverage!: Phaser.GameObjects.Graphics
-  private coverageKey = ''
   /** Upgrade levels whose textures have been baked, as "kind:level". */
   private tiers = new Set<string>()
-  /** Additive copy of the hovered building's sprite, so it lights up. */
-  private glow!: Phaser.GameObjects.Image
-  private drag: null | { mode: 'place' | 'remove' | 'pan'; last: [number, number] | null; sx: number; sy: number; scrollX: number; scrollY: number; moved: boolean; placed: Set<number> } = null
-  private pinch: null | { d: number; zoom: number } = null
+  private addTexture: TextureSink = (k, cv) => {
+    if (!this.textures.exists(k)) this.textures.addCanvas(k, cv)
+  }
 
   constructor(store: GameStore) {
     super('mars')
@@ -79,22 +75,17 @@ export class MarsScene extends Phaser.Scene {
   }
 
   create() {
+    // Under React StrictMode the first game is destroyed before it boots; Phaser still
+    // creates its scene, so skip the bake and leave the shared store alone.
+    if ((this.game as unknown as { pendingDestroy?: boolean }).pendingDestroy) return
     if (process.env.NODE_ENV !== 'production') (window as unknown as { __scene: MarsScene }).__scene = this
-    bakeAll((k, cv) => {
-      if (!this.textures.exists(k)) this.textures.addCanvas(k, cv)
-    })
+    bakeAll(this.addTexture)
     this.units = new Units(this)
-    this.hover = this.add.image(0, 0, 'hover').setDepth(-0.5).setVisible(false)
-    this.range = this.add.graphics().setDepth(-0.6)
-    this.foot = this.add.graphics().setDepth(-0.55)
-    this.cables = this.add.graphics().setDepth(1.5e6)
-    this.coverage = this.add.graphics().setDepth(-0.58)
-    this.glow = this.add.image(0, 0, 'b_solar_0').setBlendMode(Phaser.BlendModes.ADD).setVisible(false)
-    this.ghost = this.add.image(0, 0, 'b_solar_0').setAlpha(0.6).setVisible(false)
-    this.ghostArrow = this.add.image(0, 0, 'arrow_0').setDepth(1e6).setVisible(false)
-    // supply ships land on the open front sub-tile of the core's pad, so they sort just in front of the core
-    this.ship = this.add.image(0, 0, 'ship').setOrigin(0.5, 59 / 66).setVisible(false).setDepth((CORE_AT * 2 + 1) * 10 + 7)
-    this.flame = this.add.image(0, 0, 'flame').setVisible(false).setDepth((CORE_AT * 2 + 1) * 10 + 6.5)
+    this.shadows = this.add.renderTexture(0, 0, TER_W, TER_H).setOrigin(0).setDepth(DEPTH.shadows)
+    this.roads = this.add.renderTexture(0, 0, TER_W, TER_H).setOrigin(0).setDepth(DEPTH.roads)
+    this.overlays = new Overlays(this, this.store, this.sprites)
+    this.ship = this.add.image(0, 0, 'ship').setOrigin(0.5, 59 / 66).setVisible(false).setDepth(SHIP_DEPTH)
+    this.flame = this.add.image(0, 0, 'flame').setVisible(false).setDepth(SHIP_DEPTH - 0.5)
 
     const cam = this.cameras.main
     cam.setRoundPixels(true)
@@ -103,173 +94,25 @@ export class MarsScene extends Phaser.Scene {
     // the camera only knows its real size after the first resize, so centre on the next frame
     this.store.centerRequest = true
 
-    this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT', false) as Record<string, Phaser.Input.Keyboard.Key>
-    this.input.addPointer(1)
-    this.input.mouse?.disableContextMenu()
-    this.input.on('pointerdown', this.onDown, this)
-    this.input.on('pointermove', this.onMove, this)
-    this.input.on('pointerup', this.onUp, this)
-    this.input.on('pointerupoutside', this.onUp, this)
-    this.input.on('gameout', () => {
+    this.controls = new MapInput(this, this.store)
+    this.controls.attach()
+
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => {
+      const w = window as unknown as { __scene?: MarsScene }
+      if (w.__scene === this) delete w.__scene
       this.store.ui.hover = null
       this.store.ui.pointer = null
     })
-    this.input.on('wheel', (p: Phaser.Input.Pointer, _o: unknown, _dx: number, dy: number) => this.zoomBy(dy > 0 ? -1 : 1, p.x, p.y))
   }
-
-  /* -------------------------------- camera -------------------------------- */
-
-  private centerOnCore() {
-    const [x, y] = top(CORE_AT, CORE_AT)
-    this.cameras.main.centerOn(x, y + 16)
-  }
-
-  private zoomBy(step: number, sx = this.scale.width / 2, sy = this.scale.height / 2) {
-    const cam = this.cameras.main
-    const k = ZOOMS.indexOf(this.store.ui.zoom)
-    const next = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, (k < 0 ? 2 : k) + step))]
-    if (next === cam.zoom) return
-    const before = cam.getWorldPoint(sx, sy)
-    cam.setZoom(next)
-    cam.preRender()
-    const after = cam.getWorldPoint(sx, sy)
-    cam.scrollX += before.x - after.x
-    cam.scrollY += before.y - after.y
-    this.store.ui.zoom = next
-    this.store.bump()
-  }
-
-  private tileAt(sx: number, sy: number): [number, number] | null {
-    const p = this.cameras.main.getWorldPoint(sx, sy)
-    const a = (p.x - TER_OX) / 16
-    const b = (p.y - TER_OY - 8) / 8
-    const i = Math.round((a + b) / 2)
-    const j = Math.round((b - a) / 2)
-    return i < 0 || j < 0 || i >= MAP || j >= MAP ? null : [i, j]
-  }
-
-  /* -------------------------------- input --------------------------------- */
-
-  private onDown(p: Phaser.Input.Pointer) {
-    const pts = this.input.manager.pointers.filter((q) => q.isDown)
-    if (pts.length >= 2) {
-      this.drag = null
-      this.pinch = { d: Phaser.Math.Distance.Between(pts[0].x, pts[0].y, pts[1].x, pts[1].y), zoom: this.store.ui.zoom }
-      return
-    }
-    const cam = this.cameras.main
-    const t = this.tileAt(p.x, p.y)
-    const base = { sx: p.x, sy: p.y, scrollX: cam.scrollX, scrollY: cam.scrollY, moved: false, last: t, placed: new Set<number>() }
-    if (p.rightButtonDown()) {
-      this.drag = { mode: 'remove', ...base }
-      if (t) this.store.removeAt(t[0], t[1])
-    } else if (p.middleButtonDown() || !this.store.ui.tool) {
-      this.drag = { mode: 'pan', ...base }
-    } else {
-      this.drag = { mode: 'place', ...base }
-      if (t) this.placeAt(t[0], t[1])
-    }
-  }
-
-  private onMove(p: Phaser.Input.Pointer) {
-    const t = this.tileAt(p.x, p.y)
-    this.store.ui.hover = t
-    this.store.ui.pointer = [p.x, p.y]
-    if (this.pinch) {
-      const pts = this.input.manager.pointers.filter((q) => q.isDown)
-      if (pts.length >= 2) {
-        const d = Phaser.Math.Distance.Between(pts[0].x, pts[0].y, pts[1].x, pts[1].y)
-        const want = this.pinch.zoom * (d / this.pinch.d)
-        const k = ZOOMS.reduce((best, z) => (Math.abs(z - want) < Math.abs(best - want) ? z : best), ZOOMS[0])
-        if (k !== this.store.ui.zoom) this.zoomBy(ZOOMS.indexOf(k) - ZOOMS.indexOf(this.store.ui.zoom))
-      }
-      return
-    }
-    const d = this.drag
-    if (!d || !p.isDown) return
-    if (Math.abs(p.x - d.sx) + Math.abs(p.y - d.sy) > 6) d.moved = true
-    if (d.mode === 'pan') {
-      const cam = this.cameras.main
-      cam.scrollX = d.scrollX - (p.x - d.sx) / cam.zoom
-      cam.scrollY = d.scrollY - (p.y - d.sy) / cam.zoom
-      return
-    }
-    if (!t || (d.last && d.last[0] === t[0] && d.last[1] === t[1])) return
-    // walk the grid from the last tile to this one so fast drags leave no gaps
-    let [ci, cj] = d.last ?? t
-    while (ci !== t[0] || cj !== t[1]) {
-      const pi = ci
-      const pj = cj
-      if (ci !== t[0]) ci += Math.sign(t[0] - ci)
-      else cj += Math.sign(t[1] - cj)
-      if (d.mode === 'remove') this.store.removeAt(ci, cj)
-      else {
-        if (this.store.ui.tool === 'belt') {
-          const dir = (ci > pi ? 0 : cj > pj ? 1 : ci < pi ? 2 : 3) as Dir
-          this.store.ui.dir = dir
-          const prev = this.store.sim.entAt(pi, pj)
-          if (prev && prev.kind === 'belt' && d.placed.has(prev.id)) this.store.sim.setDir(prev, dir)
-        }
-        this.placeAt(ci, cj)
-      }
-    }
-    d.last = t
-  }
-
-  private onUp(p: Phaser.Input.Pointer) {
-    const d = this.drag
-    this.pinch = null
-    this.drag = null
-    if (!d || d.moved || d.mode !== 'pan' || p.button !== 0) return
-    // a click without a tool selects
-    const t = this.tileAt(p.x, p.y)
-    const e = t ? this.store.sim.entAt(t[0], t[1]) : null
-    this.store.ui.selected = e ? e.id : null
-    this.store.bump()
-  }
-
-  private placeAt(hi: number, hj: number) {
-    const tool = this.store.ui.tool
-    if (!tool) return
-    const [i, j] = anchorFor(tool, hi, hj)
-    const sim = this.store.sim
-    const there = sim.entAt(i, j)
-    if (tool === 'belt' && there?.kind === 'belt' && this.drag && !this.drag.placed.has(there.id) && there.dir % 2 !== this.store.ui.dir % 2) {
-      // dragging a belt across a perpendicular one: swap it for a junction so both lines cross
-      sim.remove(i, j)
-      const err = sim.place('junction', i, j, 0)
-      if (err) sim.place('belt', i, j, there.dir)
-      else this.drag.placed.add(sim.entAt(i, j)!.id)
-      this.store.bump()
-      return
-    }
-    if (tool === 'belt' && there?.kind === 'junction') return // run straight through existing junctions
-    const err = sim.place(tool, i, j, this.store.ui.dir)
-    if (!err) {
-      const e = this.store.sim.entAt(i, j)
-      if (e) this.drag?.placed.add(e.id)
-      this.store.bump()
-    } else if (err === 'Not enough materials' || err === 'Not researched yet') {
-      this.store.sim.log(`${BUILDINGS[tool].name}: ${err.toLowerCase()}.`, 'warn')
-      this.store.bump()
-    }
-  }
-
 
   /* -------------------------------- frame --------------------------------- */
 
   update(_time: number, delta: number) {
+    if (!this.controls) return
     const store = this.store
-    const sim = store.sim
     if (store.epoch !== this.epoch) this.rebuild()
-    if (store.centerRequest) {
-      store.centerRequest = false
-      this.centerOnCore()
-    }
-    if (store.zoomRequest) {
-      this.zoomBy(store.zoomRequest)
-      store.zoomRequest = 0
-    }
+    const sim = store.sim
+    this.controls.update(delta)
 
     // fixed-step simulation
     const running = !store.ui.paused && !store.ui.panel && !sim.popups.length && !sim.over
@@ -283,21 +126,12 @@ export class MarsScene extends Phaser.Scene {
       }
     }
 
-    // keyboard pan
-    const cam = this.cameras.main
-    const v = (delta / 1000) * (420 / cam.zoom)
-    const k = this.keys
-    if (k.A.isDown || k.LEFT.isDown) cam.scrollX -= v
-    if (k.D.isDown || k.RIGHT.isDown) cam.scrollX += v
-    if (k.W.isDown || k.UP.isDown) cam.scrollY -= v
-    if (k.S.isDown || k.DOWN.isDown) cam.scrollY += v
-
     sim.ensureBelts()
     sim.ensureGrid()
     if (sim.rev !== this.rev) this.syncSprites()
     this.animate()
     this.drawItems()
-    this.drawCursor()
+    this.overlays.draw()
     this.drawShip()
     if (sim.roadRev !== this.roadRev) this.drawRoads()
     const sun = sim.sun()
@@ -315,50 +149,66 @@ export class MarsScene extends Phaser.Scene {
     }
   }
 
+  /** A whole new sim: drop everything drawn for the old one. */
   private rebuild() {
     this.epoch = this.store.epoch
-    for (const s of this.sprites.values()) s.destroy()
+    const sim = this.store.sim
+    for (const s of this.sprites.values()) {
+      this.tweens.killTweensOf(s)
+      s.destroy()
+    }
     for (const s of this.icons.values()) s.destroy()
-    for (const s of this.slabs.values()) s.destroy()
+    for (const p of this.ports) p.img.destroy()
+    for (const it of this.items) it.setVisible(false)
     this.sprites.clear()
     this.icons.clear()
-    this.slabs.clear()
-    this.shadows?.destroy()
-    this.shadows = this.add.renderTexture(0, 0, TER_W, TER_H).setOrigin(0).setDepth(-0.8)
-    this.units.reset(this.store.sim)
-    this.roads?.destroy()
-    this.roads = this.add.renderTexture(0, 0, TER_W, TER_H).setOrigin(0).setDepth(-5)
+    this.ports = []
+    this.portsKey = ''
+    this.shadows.clear()
+    this.roads.clear()
     this.roadRev = -1
+    this.baysKey = ''
     this.rev = -1
-    this.lastShip = this.store.sim.ev.ship
-    const key = `terrain_${this.store.sim.seed}`
-    if (!this.textures.exists(key)) this.textures.addCanvas(key, terrainCanvas(this.store.sim.ground))
-    this.terrain?.destroy()
-    this.terrain = this.add.image(0, 0, key).setOrigin(0).setDepth(-10)
+    this.acc = 0
+    this.units.reset(sim)
+    this.overlays.reset()
+    this.controls.cancel()
+    this.shipChain?.stop()
+    this.shipChain = undefined
+    this.ship.setVisible(false)
+    this.flame.setVisible(false)
+    this.lastShip = sim.ev.ship
+    const key = `terrain_${sim.seed}`
+    if (key !== this.terrainKey) {
+      this.terrain?.destroy()
+      this.terrain = undefined
+      if (this.terrainKey && this.textures.exists(this.terrainKey)) this.textures.remove(this.terrainKey)
+      if (!this.textures.exists(key)) this.textures.addCanvas(key, terrainCanvas(sim.ground))
+      this.terrain = this.add.image(0, 0, key).setOrigin(0).setDepth(DEPTH.terrain)
+      this.terrainKey = key
+    }
   }
 
+  /** The layout changed (built, removed, rotated, upgraded): bring sprites and everything derived from them up to date. */
   private syncSprites() {
-    this.rev = this.store.sim.rev
+    const sim = this.store.sim
+    this.rev = sim.rev
     // upgraded buildings: bake their textures the first time each level appears
-    for (const e of this.store.sim.ents.values()) {
+    for (const e of sim.ents.values()) {
       const key = `${e.kind}:${e.level}`
       if (e.level > 1 && !this.tiers.has(key)) {
         this.tiers.add(key)
-        bakeTier((k, cv) => {
-          if (!this.textures.exists(k)) this.textures.addCanvas(k, cv)
-        }, e.kind, e.level)
+        bakeTier(this.addTexture, e.kind, e.level)
       }
     }
-    this.coverageKey = ''
-    const ents = this.store.sim.ents
+    const ents = sim.ents
     for (const [id, s] of this.sprites)
       if (!ents.has(id)) {
+        this.tweens.killTweensOf(s)
         s.destroy()
         this.sprites.delete(id)
         this.icons.get(id)?.destroy()
         this.icons.delete(id)
-        this.slabs.get(id)?.destroy()
-        this.slabs.delete(id)
       }
     for (const e of ents.values()) {
       let s = this.sprites.get(e.id)
@@ -372,18 +222,23 @@ export class MarsScene extends Phaser.Scene {
         }
       }
       const [x, cy] = centreOf(e.kind, e.i, e.j)
-      const [ox, oy] = originOf(e.kind)
-      if (e.kind === 'belt') s.setPosition(x, cy).setOrigin(0.5).setDepth(-1)
-      else if (e.kind === 'junction') s.setPosition(x, cy).setOrigin(17 / 34, 13 / 22).setDepth(-0.95)
-      else s.setPosition(x, cy).setOrigin(ox, oy).setDepth(depthFor(e.kind, e.i, e.j))
-      const sk = slabKey(e.kind)
-      if (sk && !this.slabs.has(e.id)) this.slabs.set(e.id, this.add.image(x, cy, sk).setOrigin(ox, oy).setDepth(-0.9))
+      s.setPosition(x, cy)
+      if (e.kind === 'belt') s.setOrigin(0.5)
+      else if (e.kind === 'junction') s.setOrigin(JUNCTION_ORIGIN[0], JUNCTION_ORIGIN[1])
+      else s.setOrigin(...originOf(e.kind))
+      setDep(s, e.kind === 'belt' ? DEPTH.belt : e.kind === 'junction' ? DEPTH.junction : depthFor(e.kind, e.i, e.j))
     }
+    this.overlays.invalidate()
     this.drawShadows()
-    this.drawCables()
+    this.overlays.drawCables()
     this.syncPorts()
-    this.roadRev = -1 // rover bays depend on what's built in front of the core
-    this.units.noticeBuilds(this.store.sim)
+    // rover bays are drawn with the roads, and only on open tiles in front of the core
+    const bays = ROVER_BAYS.map(([i, j]) => (sim.entAt(i, j) ? 1 : 0)).join('')
+    if (bays !== this.baysKey) {
+      this.baysKey = bays
+      this.roadRev = -1
+    }
+    this.units.noticeBuilds(sim)
   }
 
   /**
@@ -391,18 +246,12 @@ export class MarsScene extends Phaser.Scene {
    * faces, and a loader dock (with a pickup arm) on every edge a belt delivers to.
    */
   private syncPorts() {
-    for (const p of this.ports) p.img.destroy()
-    this.ports = []
     const sim = this.store.sim
+    const specs: { owner: Ent; fi: number; fj: number; dir: Dir; kind: 'in' | 'out' }[] = []
+    let key = ''
     const add = (owner: Ent, fi: number, fj: number, dir: Dir, kind: 'in' | 'out') => {
-      // the dock sits on the midpoint of the footprint edge facing `dir`
-      const [x, y] = top(fi + 0.5 + 0.5 * DI[dir], fj + 0.5 + 0.5 * DJ[dir])
-      const back = dir === 2 || dir === 3
-      const img = this.add
-        .image(x, y, `port_${kind}_${dir}_0`)
-        .setOrigin(PORT_AX / PORT_W, PORT_AY / PORT_H)
-        .setDepth(depthFor(owner.kind, owner.i, owner.j) + (back ? -0.5 : 0.5))
-      this.ports.push({ img, owner: owner.id, kind, dir })
+      specs.push({ owner, fi, fj, dir, kind })
+      key += `${owner.id}${kind}${dir}@${fi},${fj};`
     }
     for (const e of sim.ents.values()) {
       if (!BUILDINGS[e.kind].outputs) continue
@@ -410,123 +259,66 @@ export class MarsScene extends Phaser.Scene {
       if (e.kind !== 'belt') add(e, ti - DI[e.dir], tj - DJ[e.dir], e.dir, 'out')
       // a belt delivering into a machine or the core gets a loader dock on that edge
       const target = sim.entAt(ti, tj)
-      if (e.kind === 'belt' && target && target.kind !== 'belt' && (target.kind === 'core' || BUILDINGS[target.kind].recipe))
-        add(target, ti, tj, ((e.dir + 2) % 4) as Dir, 'in')
+      if (e.kind === 'belt' && target && target.kind !== 'belt' && (target.kind === 'core' || BUILDINGS[target.kind].recipe)) add(target, ti, tj, ((e.dir + 2) % 4) as Dir, 'in')
     }
+    if (key === this.portsKey) return
+    this.portsKey = key
+    // reuse the images we have, make or drop the difference
+    specs.forEach((p, k) => {
+      // the dock sits on the midpoint of the footprint edge facing `dir`
+      const [x, y] = top(p.fi + 0.5 + 0.5 * DI[p.dir], p.fj + 0.5 + 0.5 * DJ[p.dir])
+      const back = p.dir === 2 || p.dir === 3
+      const tex = `port_${p.kind}_${p.dir}_0`
+      let port = this.ports[k]
+      if (!port) {
+        port = { img: this.add.image(x, y, tex).setOrigin(PORT_AX / PORT_W, PORT_AY / PORT_H), owner: 0, kind: p.kind, dir: p.dir }
+        this.ports.push(port)
+      }
+      setTex(port.img, tex).setPosition(x, y)
+      setDep(port.img, depthFor(p.owner.kind, p.owner.i, p.owner.j) + (back ? -0.5 : 0.5))
+      port.owner = p.owner.id
+      port.kind = p.kind
+      port.dir = p.dir
+    })
+    for (const p of this.ports.splice(specs.length)) p.img.destroy()
   }
 
   private drawRoads() {
     const sim = this.store.sim
     const rt = this.roads
-    if (!rt) return
     this.roadRev = sim.roadRev
     rt.clear()
+    rt.beginDraw()
     for (let j = 0; j < MAP; j++)
       for (let i = 0; i < MAP; i++) {
         const lvl = sim.roadLevel(i, j)
         if (!lvl) continue
         let mask = 0
         for (let d = 0; d < 4; d++) if (sim.roadLevel(i + DI[d], j + DJ[d])) mask |= 1 << d
-        const [x, y] = top(i, j)
-        rt.stamp(`road_${lvl}_${mask}`, undefined, x, y + 8)
+        rt.stamp(`road_${lvl}_${mask}`, undefined, centreX(i, j), centreY(i, j), IN_BATCH)
       }
     // rover charging bays on the open tiles in front of the core
     for (const [i, j] of ROVER_BAYS) {
       const g = sim.groundAt(i, j)
       if (!g || g === 'rock' || g === 'crater' || sim.entAt(i, j)) continue
-      const [x, y] = top(i, j)
-      rt.stamp('bay', undefined, x, y + 8, { originX: 17 / 34, originY: 21 / 30 })
+      rt.stamp('bay', undefined, centreX(i, j), centreY(i, j), BAY_STAMP)
     }
-  }
-
-  /** Where a cable attaches to a grid node, in world px. */
-  private nodeTop(e: Ent): [number, number] {
-    const [x, y] = centreOf(e.kind, e.i, e.j)
-    if (e.kind === 'pylon') return [x, y - 1 - PYLON_TOP[e.level - 1]]
-    return [x + 16, y - 6 - 22] // the antenna on the core's crew module
-  }
-
-  /** Sagging power cables between linked grid nodes, drawn pixel by pixel. */
-  private drawCables() {
-    const g = this.cables
-    g.clear()
-    const sim = this.store.sim
-    for (const [a, b] of sim.links) {
-      const ea = sim.ents.get(a)
-      const eb = sim.ents.get(b)
-      if (!ea || !eb) continue
-      const [x0, y0] = this.nodeTop(ea)
-      const [x1, y1] = this.nodeTop(eb)
-      const len = Math.hypot(x1 - x0, y1 - y0)
-      const sag = Math.min(14, len * 0.08)
-      const n = Math.ceil(len)
-      for (let k = 0; k <= n; k++) {
-        const s = k / n
-        const x = Math.round(x0 + (x1 - x0) * s)
-        const y = Math.round(y0 + (y1 - y0) * s + sag * 4 * s * (1 - s))
-        g.fillStyle(0x151618, 1).fillRect(x, y, 1, 1)
-        if (k % 3 === 0) g.fillStyle(0x3e8da8, 0.9).fillRect(x, y - 1, 1, 1)
-      }
-    }
-  }
-
-  /**
-   * Grid coverage: shown in the power view (P), and automatically while placing
-   * a pylon or anything that uses or makes power. A pylon being placed also
-   * previews its own square and the cables it would string.
-   */
-  private drawCoverage() {
-    const ui = this.store.ui
-    const sim = this.store.sim
-    const tool = ui.tool
-    const def = tool ? BUILDINGS[tool] : null
-    const show = ui.powerView || tool === 'pylon' || (!!def && (def.power > 0 || !!def.gen))
-    const h = ui.hover
-    const key = show ? `${sim.rev}:${tool}:${tool === 'pylon' && h ? h : ''}:${ui.powerView}` : ''
-    if (key === this.coverageKey) return
-    this.coverageKey = key
-    const g = this.coverage
-    g.clear()
-    for (const e of sim.ents.values()) {
-      const s = this.sprites.get(e.id)
-      if (!s || e.kind === 'belt' || e.kind === 'junction') continue
-      const needs = BUILDINGS[e.kind].power > 0 || !!BUILDINGS[e.kind].gen
-      s.setTint(show && needs && !e.onGrid ? 0xff9a8e : 0xffffff)
-    }
-    if (!show) return
-    const tile = (i: number, j: number, color: number, alpha: number) => {
-      const [x, y] = top(i, j)
-      g.fillStyle(color, alpha).fillPoints([new Phaser.Math.Vector2(x, y), new Phaser.Math.Vector2(x + 16, y + 8), new Phaser.Math.Vector2(x, y + 16), new Phaser.Math.Vector2(x - 16, y + 8)], true)
-    }
-    for (let j = 0; j < MAP; j++) for (let i = 0; i < MAP; i++) if (sim.covered[j * MAP + i]) tile(i, j, 0x65c9e8, 0.13)
-    if (tool === 'pylon' && h) {
-      const r = PYLON_REACH[0]
-      for (let j = h[1] - r; j <= h[1] + r; j++) for (let i = h[0] - r; i <= h[0] + r; i++) if (i >= 0 && j >= 0 && i < MAP && j < MAP && !sim.covered[j * MAP + i]) tile(i, j, 0xf4d03f, 0.16)
-      // cables it would string to nodes in reach
-      const [px, py] = top(h[0] + 0.5, h[1] + 0.5)
-      for (const n of sim.ents.values()) {
-        if ((n.kind !== 'pylon' && n.kind !== 'core') || !n.onGrid) continue
-        const ci = n.i + (BUILDINGS[n.kind].w - 1) / 2
-        const cj = n.j + (BUILDINGS[n.kind].h - 1) / 2
-        if (Math.hypot(ci - h[0], cj - h[1]) > Math.max(PYLON_LINK[0], n.kind === 'core' ? 12 : PYLON_LINK[n.level - 1])) continue
-        const [nx, ny] = this.nodeTop(n)
-        g.lineStyle(1, 0xf4d03f, 0.8).lineBetween(px, py - PYLON_TOP[0] - 1, nx, ny)
-      }
-    }
+    rt.endDraw()
   }
 
   private drawShadows() {
     const rt = this.shadows
-    if (!rt) return
     rt.clear()
+    rt.beginDraw()
     for (const e of this.store.sim.ents.values()) {
       if (e.kind === 'belt' || e.kind === 'junction') continue
       const sk = this.textures.exists(shKey(e.kind, e.level)) ? shKey(e.kind, e.level) : shKey(e.kind, 1)
       if (!this.textures.exists(sk)) continue
       const [x, cy] = centreOf(e.kind, e.i, e.j)
       const big = isBig(e.kind)
-      rt.stamp(sk, undefined, x - (big ? CORE_AX : SPR_AX), cy - (big ? CORE_AY : SPR_AY), { originX: 0, originY: 0 })
+      rt.stamp(sk, undefined, x - (big ? CORE_AX : SPR_AX), cy - (big ? CORE_AY : SPR_AY), SHADOW_STAMP)
     }
+    rt.endDraw()
   }
 
   private texFor(e: Ent, f: number) {
@@ -538,11 +330,7 @@ export class MarsScene extends Phaser.Scene {
       return bKey('melter', L, e.working ? f : 0, `_${Math.min(4, Math.floor(w * 0.7))}`)
     }
     if (e.kind === 'greenhouse') return e.working ? bKey('greenhouse', L, f) : bKey('greenhouse', L, 0, '_dim')
-    if (ANIMATED.includes(e.kind) || e.kind === 'habitat' || e.kind === 'shield' || e.kind === 'pylon' || L > 1) {
-      const on = e.working || e.kind === 'solar' || e.kind === 'core' || e.kind === 'battery' || e.kind === 'reactor' || e.kind === 'pylon' || L > 1
-      return bKey(e.kind, L, on ? f : 0)
-    }
-    return bKey(e.kind, 1, 0)
+    return bKey(e.kind, L, e.working || ALWAYS_ON.has(e.kind) ? f : 0)
   }
 
   private animate() {
@@ -551,64 +339,63 @@ export class MarsScene extends Phaser.Scene {
     const f = Math.floor(t * 4) % FRAMES
     const beltF = Math.floor(sim.time * (sim.done.has('maglev') ? 14 : 8)) % FRAMES
     const blink = Math.floor(t * 2) % 2 === 0
-    const sel = this.store.ui.selected
-    this.shadows?.setAlpha(0.08 + 0.32 * sim.sun())
+    this.shadows.setAlpha(0.08 + 0.32 * sim.sun())
     for (const p of this.ports) {
       const owner = sim.ents.get(p.owner)
       const busy = owner && (owner.working || owner.kind === 'core')
-      p.img.setTexture(`port_${p.kind}_${p.dir}_${busy ? f : 0}`)
+      setTex(p.img, `port_${p.kind}_${p.dir}_${busy ? f : 0}`)
     }
     for (const e of sim.ents.values()) {
       const s = this.sprites.get(e.id)
       if (!s) continue
-      s.setTexture(this.texFor(e, e.kind === 'belt' || e.kind === 'junction' ? beltF : f))
+      setTex(s, this.texFor(e, e.kind === 'belt' || e.kind === 'junction' ? beltF : f))
       const st = e.status
-      const show = st === 'nopower' || st === 'nogrid' || st === 'noinput' || st === 'blocked' || st === 'unshielded' || st === 'badground'
       let icon = this.icons.get(e.id)
-      if (show) {
+      if (ICON_STATUS.has(st)) {
         if (!icon) {
-          icon = this.add.image(0, 0, `icon_${st}`).setDepth(1e6)
+          const [x, cy] = centreOf(e.kind, e.i, e.j)
+          const lift = isBig(e.kind) ? 46 : e.kind === 'drill' ? 34 : 26
+          icon = this.add.image(x, cy - lift, `icon_${st}`).setDepth(DEPTH.overlay)
           this.icons.set(e.id, icon)
         }
-        const [x, cy] = centreOf(e.kind, e.i, e.j)
-        const lift = isBig(e.kind) ? 46 : e.kind === 'drill' ? 34 : 26
-        icon.setTexture(`icon_${st}`).setPosition(x, cy - lift).setVisible(blink || st === 'noinput')
-        icon.setAlpha(st === 'noinput' ? 0.75 : 1)
+        setTex(icon, `icon_${st}`)
+          .setVisible(blink || st === 'noinput')
+          .setAlpha(st === 'noinput' ? 0.75 : 1)
       } else if (icon) icon.setVisible(false)
     }
   }
 
   private drawItems() {
     const sim = this.store.sim
+    const items = this.items
     let n = 0
-    const vec = (d: Dir) => [(DI[d] - DJ[d]) * 16, (DI[d] + DJ[d]) * 8] as const
     const put = (key: string, px: number, py: number, depth: number) => {
-      let img = this.items[n]
+      let img = items[n++]
       if (!img) {
         img = this.add.image(0, 0, key).setOrigin(0.5, 0.7)
-        this.items.push(img)
+        items.push(img)
       }
-      img.setTexture(key).setPosition(Math.round(px), Math.round(py - 1)).setDepth(depth).setVisible(true)
-      n++
+      setTex(img, key).setPosition(Math.round(px), Math.round(py - 1)).setVisible(true)
+      setDep(img, depth)
     }
     for (const e of sim.ents.values()) {
       if (e.kind !== 'belt' && e.kind !== 'junction') continue
-      const [x, y] = top(e.i, e.j)
-      const cx = x
-      const cy = y + 8
+      const cx = centreX(e.i, e.j)
+      const cy = centreY(e.i, e.j)
+      const row = e.i + e.j
       if (e.kind === 'junction') {
         // each lane crosses the tile in its own travel direction
         for (let d = 0; d < 4; d++) {
-          const [ux, uy] = vec(d as Dir)
+          const [ux, uy] = DIR_VEC[d]
           const sgn = d === 0 || d === 1 ? 1 : -1
           for (const it of e.lanes[d]) {
             const o = it.pos - 0.5
-            put(`item_${it.item}`, cx + ux * o, cy + uy * o - 2, (e.i + e.j + o * sgn) * 10 + 3)
+            put(ITEM_KEY[it.item], cx + ux * o, cy + uy * o - 2, itemDepth(row, o * sgn))
           }
         }
         continue
       }
-      const [ux, uy] = vec(e.dir)
+      const [ux, uy] = DIR_VEC[e.dir]
       const sgn = e.dir === 0 || e.dir === 1 ? 1 : -1
       for (const it of e.items) {
         const o = it.pos - 0.5
@@ -616,118 +403,28 @@ export class MarsScene extends Phaser.Scene {
         let py = cy + uy * o
         // items that came in round a corner or a Y follow a quarter circle from their side
         if (it.from !== undefined) {
-          const [sx, sy] = vec(it.from)
+          const [sx, sy] = DIR_VEC[it.from]
           const th = (it.pos * Math.PI) / 2
-          const kx = cx + 0.5 * ux + 0.5 * sx
-          const ky = cy + 0.5 * uy + 0.5 * sy
-          px = kx - 0.5 * ux * Math.cos(th) - 0.5 * sx * Math.sin(th)
-          py = ky - 0.5 * uy * Math.cos(th) - 0.5 * sy * Math.sin(th)
+          const c = Math.cos(th)
+          const s = Math.sin(th)
+          px = cx + 0.5 * ux + 0.5 * sx - 0.5 * ux * c - 0.5 * sx * s
+          py = cy + 0.5 * uy + 0.5 * sy - 0.5 * uy * c - 0.5 * sy * s
         }
-        put(`item_${it.item}`, px, py, (e.i + e.j + o * sgn) * 10 + 3)
+        put(ITEM_KEY[it.item], px, py, itemDepth(row, o * sgn))
       }
     }
-    for (let k = n; k < this.items.length; k++) this.items[k].setVisible(false)
-  }
-
-
-  private outline(kind: Kind, i: number, j: number, color: number, alpha: number) {
-    const { w, h } = BUILDINGS[kind]
-    const pts = [top(i, j), top(i + w, j), top(i + w, j + h), top(i, j + h)].map(([x, y]) => new Phaser.Math.Vector2(x, y))
-    this.foot.lineStyle(1, color, alpha).strokePoints(pts, true, true)
-    this.foot.fillStyle(color, alpha * 0.12).fillPoints(pts, true)
-  }
-
-  private drawCursor() {
-    const ui = this.store.ui
-    const sim = this.store.sim
-    const h = ui.hover
-    const tool = ui.tool
-    const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 180)
-    this.foot.clear()
-    this.glow.setVisible(false)
-    this.hover.setVisible(false)
-    this.ghost.setVisible(false)
-    this.ghostArrow.setVisible(false)
-    ui.hoverErr = null
-
-    // the selected building keeps a steady outline
-    const sel = this.store.selectedEnt()
-    if (sel && sel.kind !== 'belt') this.outline(sel.kind, sel.i, sel.j, 0xe8753b, 0.9)
-
-    if (h && tool) {
-      // build preview: footprint outline, ghost sprite and output arrow
-      const [i, j] = anchorFor(tool, h[0], h[1])
-      const err = sim.placeError(tool, i, j)
-      ui.hoverErr = err
-      this.outline(tool, i, j, err ? 0xff5a4f : 0xfff7e8, 0.95)
-      const def = BUILDINGS[tool]
-      const f = Math.floor(performance.now() / 250) % FRAMES
-      const [x, cy] = centreOf(tool, i, j)
-      if (tool === 'belt') this.ghost.setTexture(`belt_${ui.dir}_${f}`).setOrigin(0.5).setPosition(x, cy).setDepth(-0.9)
-      else {
-        const [ox, oy] = originOf(tool)
-        this.ghost.setTexture(tool === 'melter' ? `b_melter_2_${f}` : `b_${tool}_${f}`).setOrigin(ox, oy).setPosition(x, cy).setDepth(depthFor(tool, i, j) + 1)
-      }
-      this.ghost.setVisible(true).setAlpha(err ? 0.35 : 0.7).setTint(err ? 0xff6a5f : 0xffffff)
-      if (def.outputs && tool !== 'belt') {
-        const [ti, tj] = outTileFor(tool, i, j, ui.dir)
-        const [ax, ay] = top(ti, tj)
-        this.ghostArrow.setTexture(`arrow_${ui.dir}`).setPosition(ax, ay + 8).setVisible(true)
-      }
-    } else if (h) {
-      const e = sim.entAt(h[0], h[1])
-      if (!e) {
-        const [x, y] = top(h[0], h[1])
-        this.hover.setTexture('hover').setPosition(x, y + 8).setVisible(true)
-      } else {
-        // hover highlight: pulsing footprint outline, and the sprite lights up
-        this.outline(e.kind, e.i, e.j, 0xffe7b8, pulse)
-        const s = this.sprites.get(e.id)
-        if (s && e.kind !== 'belt')
-          this.glow
-            .setTexture(s.texture.key)
-            .setOrigin(s.originX, s.originY)
-            .setPosition(s.x, s.y)
-            .setDepth(s.depth + 0.01)
-            .setAlpha(0.16 + 0.1 * pulse)
-            .setVisible(true)
-        if (BUILDINGS[e.kind].outputs && e.kind !== 'belt') {
-          const [ti, tj] = outTileFor(e.kind, e.i, e.j, e.dir)
-          const [ax, ay] = top(ti, tj)
-          this.ghostArrow.setTexture(`arrow_${e.dir}`).setPosition(ax, ay + 8).setVisible(true)
-        }
-      }
+    for (let k = n; k < items.length; k++) {
+      if (!items[k].visible) break // everything past here is already hidden
+      items[k].setVisible(false)
     }
-
-    // shield coverage preview, measured from the whole footprint
-    let area: [Kind, number, number] | null = null
-    let reach = SHIELD_REACH[0]
-    if ((tool === 'shield' || tool === 'habitat') && h) area = [tool, ...anchorFor(tool, h[0], h[1])]
-    else if (sel && (sel.kind === 'shield' || sel.kind === 'habitat')) {
-      area = [sel.kind, sel.i, sel.j]
-      if (sel.kind === 'shield') reach = SHIELD_REACH[sel.level - 1]
-    }
-    this.drawCoverage()
-    const key = area ? `${area}:${reach}` : ''
-    if (key === this.rangeKey) return
-    this.rangeKey = key
-    this.range.clear()
-    if (!area) return
-    const [k, ai, aj] = area
-    const { w, h: fh } = BUILDINGS[k]
-    this.range.fillStyle(0x7ee07a, 0.18)
-    for (let j = aj - reach; j < aj + fh + reach; j++)
-      for (let i = ai - reach; i < ai + w + reach; i++) {
-        const [x, y] = top(i, j)
-        this.range.fillPoints([new Phaser.Math.Vector2(x, y), new Phaser.Math.Vector2(x + 16, y + 8), new Phaser.Math.Vector2(x, y + 16), new Phaser.Math.Vector2(x - 16, y + 8)], true)
-      }
   }
 
-
+  /** A supply ship lands on the core's front pad, waits, and lifts off again. */
   private drawShip() {
     const sim = this.store.sim
     if (sim.ev.ship === this.lastShip) return
     this.lastShip = sim.ev.ship
+    this.shipChain?.stop()
     const [x, y] = top(CORE_AT, CORE_AT)
     // core centre is (x, y + 16); its front sub-tile centre is 8px lower
     const tx = x
@@ -735,7 +432,8 @@ export class MarsScene extends Phaser.Scene {
     this.ship.setPosition(tx, ty - 240).setVisible(true)
     this.flame.setVisible(true)
     const follow = () => this.flame.setPosition(this.ship.x, this.ship.y + 6)
-    this.tweens.chain({
+    follow()
+    const chain = this.tweens.chain({
       targets: this.ship,
       tweens: [
         { y: ty, duration: 1800, ease: 'Cubic.easeOut', onUpdate: follow },
@@ -745,7 +443,9 @@ export class MarsScene extends Phaser.Scene {
       onComplete: () => {
         this.ship.setVisible(false)
         this.flame.setVisible(false)
+        if (this.shipChain === chain) this.shipChain = undefined
       },
     })
+    this.shipChain = chain
   }
 }

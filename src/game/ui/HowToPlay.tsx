@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { groundURL, itemURL, thumbURL } from '@/game/art/sprites'
 import { BUILDINGS, ITEMS, NEEDS, type ItemId, type Kind } from '@/game/core/data'
+import { MISSIONS } from '@/game/core/missions'
 
 /**
  * Illustrated, paged guide to RENOVA. Used on first launch, from the in-game
@@ -68,7 +69,7 @@ function pages(art: Art): { title: string; kicker: string; body: ReactNode }[] {
             You land with <B>4 crew</B>, a little food, water and air — and no deliveries for months. Build a factory that turns Mars itself into everything the colony needs.
           </P>
           <P>
-            Follow the <B>mission log</B> on the left of the screen. Finish all 11 missions and grow the colony to <B>20 colonists</B> to win.
+            Follow the <B>mission log</B> on the left of the screen. Finish all {MISSIONS.length} missions and grow the colony to <B>20 colonists</B> to win.
           </P>
         </>
       ),

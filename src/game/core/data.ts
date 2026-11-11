@@ -1,5 +1,5 @@
 /**
- * RENOVA game data: items, buildings, research and missions.
+ * RENOVA game data: items, buildings, research, grid and upgrade tables (missions live in missions.ts).
  * Rates are tuned so one sol (SOL seconds of game time) is a natural planning unit.
  */
 
