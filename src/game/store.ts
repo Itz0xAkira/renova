@@ -23,11 +23,17 @@ export type UIState = {
   pointer: [number, number] | null
   /** Power view: grid coverage and unconnected buildings (key P). */
   powerView: boolean
+  /**
+   * True while a panel, popup or the guide covers the map. The scene must
+   * ignore world input (keyboard panning, placing, hover) while it is set.
+   * Kept up to date by the HUD.
+   */
+  inputBlocked: boolean
 }
 
 export class GameStore {
   sim: Sim
-  ui: UIState = { tool: null, dir: 0, selected: null, speed: 1, paused: false, hover: null, hoverErr: null, panel: null, zoom: 3, pointer: null, powerView: false }
+  ui: UIState = { tool: null, dir: 0, selected: null, speed: 1, paused: false, hover: null, hoverErr: null, panel: null, zoom: 3, pointer: null, powerView: false, inputBlocked: false }
   version = 0
   /** Bumped when a whole new sim replaces the old one, so the scene rebuilds. */
   epoch = 0
