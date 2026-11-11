@@ -1,9 +1,9 @@
 /**
- * The colony rover: a pressurised crew rover for long trips across the
- * plains. A long white cabin with a raked, wraparound windscreen rides on six
- * big balloon-tread wheels; the roof carries a solar array, a dish and a whip
- * antenna; an airlock hatch opens onto a pickup bed at the back, which is empty
- * heading out and loaded with ore, sacks and a crate heading home.
+ * The colony rover: an uncrewed, AI-driven hauler. A long white drive module
+ * with a raked sensor nose (lidar window, stereo camera eyes) rides on six big
+ * balloon-tread wheels; the roof carries a solar array, a lidar drum, a dish
+ * and a whip antenna; a folded loader arm sits over the pickup bed at the back,
+ * which is empty heading out and loaded with ore, sacks and a crate heading home.
  *
  * It's drawn for all four headings so the light always comes from the upper
  * left (flipping a sprite would flip its lighting too). The rover is modelled
@@ -65,7 +65,7 @@ const WHEEL_W = 0.1
 const TRACK = 0.3 // wheel centre, either side of the middle
 const AXLES = [-0.34, 0.0, 0.34]
 
-/** The cabin's shape, shared by the paint so windows follow the rake. */
+/** The drive module's shape, shared by the paint so the sensor face follows the rake. */
 const CAB = { a: [-0.12, 0.48] as [number, number], b: [-0.235, 0.235] as [number, number], z: [0.25, 0.53] as [number, number], rakeFrom: 0.22, drop: 0.15 }
 const rakeU = (CAB.rakeFrom - CAB.a[0]) / (CAB.a[1] - CAB.a[0])
 
@@ -113,7 +113,7 @@ function model(spin: number, loaded: boolean): Part[] {
     },
   })
 
-  // the pressurised cabin, its windscreen raked back over the nose
+  // the drive module: a sealed electronics hull (nobody rides in it), its sensor nose raked back
   const cabLen = CAB.a[1] - CAB.a[0]
   parts.push({
     kind: 'box',
@@ -123,34 +123,29 @@ function model(spin: number, loaded: boolean): Part[] {
     rake: { from: CAB.rakeFrom, drop: CAB.drop },
     paint: (face, u, v) => {
       if (face === 'slope') {
-        // tinted glass with a glint running across it, framed at the edges
-        if (v < 0.07 || v > 0.93) return { ramp: RAMP.hull, shift: -0.1 }
-        const glint = Math.abs(u - (rakeU + 0.18) - (v - 0.5) * 0.3) < 0.03
-        return { ramp: RAMP.navy, shift: glint ? 0.65 : 0.2 - (u - rakeU) * 0.4 }
+        // sensor face: a dark lidar window across it, two stereo camera eyes above
+        const su = (u - rakeU) / (1 - rakeU) // 0 at the top of the rake, 1 at the nose
+        if (su > 0.45 && su < 0.75 && v > 0.08 && v < 0.92) return { ramp: RAMP.navy, shift: 0.15 + (Math.floor(v * 14) % 2) * 0.1 }
+        for (const ev of [0.3, 0.7]) if (Math.hypot((su - 0.22) * 1.4, v - ev) < 0.09) return { ramp: RAMP.cyan, shift: 0.5 }
+        return { ramp: RAMP.hull, shift: (u * cabLen) % 0.2 < 0.015 ? -0.2 : 0 }
       }
-      if (face === 'top') {
-        // roof hatch seams
-        return { ramp: RAMP.hull, shift: (u * cabLen) % 0.2 < 0.015 ? -0.18 : 0.05 }
-      }
+      if (face === 'top') return { ramp: RAMP.hull, shift: (u * cabLen) % 0.2 < 0.015 ? -0.18 : 0.05 }
       if (face === 'front') {
-        // lower nose: headlights at the corners, sensor bar in the middle
+        // lower nose: headlights at the corners, a bumper camera in the middle
         if (v > 0.25 && v < 0.5 && (u < 0.2 || u > 0.8)) return { ramp: RAMP.signal, shift: 0.45 }
-        if (v > 0.3 && v < 0.45 && u > 0.35 && u < 0.65) return { ramp: RAMP.navy, shift: 0.2 }
+        if (v > 0.3 && v < 0.45 && u > 0.42 && u < 0.58) return { ramp: RAMP.cyan, shift: 0.3 }
         return { ramp: RAMP.hull, shift: -0.08 }
       }
       if (face === 'back') {
-        // the airlock: a round hatch with a heavy frame and a handwheel
-        const d = Math.hypot((u - 0.5) * 1.6, v - 0.48)
-        if (d < 0.07) return { ramp: RAMP.metal, shift: 0.1 }
-        if (d < 0.26) return { ramp: RAMP.hull, shift: -0.12 }
-        if (d < 0.33) return { ramp: RAMP.metalHi, shift: 0 }
-        return { ramp: RAMP.hull, shift: -0.06 }
+        // service panel facing the bed: radiator fins and a charge socket
+        if (v > 0.2 && v < 0.75 && u > 0.12 && u < 0.62) return { ramp: RAMP.metalHi, shift: Math.floor(u * 16) % 2 ? 0.08 : -0.2 }
+        if (Math.hypot((u - 0.8) * 1.4, v - 0.5) < 0.1) return { ramp: RAMP.signal, shift: 0.1 }
+        return { ramp: RAMP.hull, shift: -0.08 }
       }
       if (face === 'left' || face === 'right') {
-        // wraparound windows at the front, two portholes behind, panel seams
-        const top = u > rakeU ? 1 - ((u - rakeU) / (1 - rakeU)) * (CAB.drop / (CAB.z[1] - CAB.z[0])) : 1
-        if (u > rakeU - 0.12 && v > 0.42 && v < top - 0.08) return { ramp: RAMP.navy, shift: v > top - 0.2 ? 0.35 : 0.15 }
-        for (const p of [0.22]) if (Math.hypot((u - p) * 3.2, v - 0.62) < 0.13) return { ramp: RAMP.navy, shift: 0.25 }
+        // a cyan status strip, cooling vents and access panels; no windows
+        if (v > 0.66 && v < 0.74 && u > 0.08 && u < 0.86) return { ramp: RAMP.cyan, shift: Math.floor(u * 9) % 3 === 0 ? 0.45 : 0.05 }
+        if (v > 0.24 && v < 0.52 && u > 0.12 && u < 0.36) return { ramp: RAMP.metalHi, shift: Math.floor(v * 18) % 2 ? 0.05 : -0.25 }
         if (v < 0.12) return { ramp: RAMP.metalHi, shift: -0.05 }
         return { ramp: RAMP.hull, shift: (u * cabLen) % 0.19 < 0.012 ? -0.2 : 0 }
       }
@@ -184,16 +179,24 @@ function model(spin: number, loaded: boolean): Part[] {
     paint: (face, u) => (face === 'cap' ? { ramp: RAMP.hull, shift: u < 0.25 ? -0.3 : u > 0.85 ? -0.1 : 0.08 } : { ramp: RAMP.metalHi, shift: 0 }),
   })
   parts.push({ kind: 'box', a: [-0.115, -0.1], b: [-0.2, -0.185], z: [0.53, 0.86], paint: solid(RAMP.neutral, -0.1) })
-  // forward camera pod on the roof, just behind the windscreen
+  // lidar on the roof's leading edge: a squat drum with a dark scanning band
+  parts.push({ kind: 'box', a: [0.17, 0.25], b: [-0.045, 0.045], z: [0.5, 0.55], paint: solid(RAMP.metalHi, 0.05) })
   parts.push({
     kind: 'box',
-    a: [0.185, 0.225],
-    b: [-0.05, 0.05],
-    z: [0.53, 0.58],
-    paint: (face, u, v) => (face === 'front' && v > 0.3 && v < 0.75 && u > 0.25 && u < 0.75 ? { ramp: RAMP.cyan, shift: 0.35 } : { ramp: RAMP.metalHi, shift: 0.05 }),
+    a: [0.18, 0.24],
+    b: [-0.035, 0.035],
+    z: [0.55, 0.6],
+    paint: (face, _u, v) => (face === 'top' ? { ramp: RAMP.hull, shift: 0.05 } : v > 0.3 && v < 0.7 ? { ramp: RAMP.navy, shift: 0.3 } : { ramp: RAMP.hull, shift: -0.05 }),
   })
 
-  // pickup bed behind the airlock: a floor with ribs, white side walls with the orange stripe,
+  // loader arm, folded along the bed's right side: it loads the bed itself
+  const arm = solid(RAMP.signal, 0.05)
+  parts.push({ kind: 'box', a: [-0.16, -0.12], b: [-0.2, -0.14], z: [0.27, 0.46], paint: solid(RAMP.metalHi, 0) })
+  parts.push({ kind: 'box', a: [-0.42, -0.13], b: [-0.19, -0.155], z: [0.44, 0.47], paint: arm })
+  parts.push({ kind: 'box', a: [-0.44, -0.41], b: [-0.19, -0.155], z: [0.38, 0.47], paint: arm })
+  parts.push({ kind: 'box', a: [-0.46, -0.4], b: [-0.2, -0.145], z: [0.36, 0.385], paint: solid(RAMP.metal, 0.1) })
+
+  // pickup bed behind the drive module: a floor with ribs, white side walls with the orange stripe,
   // a tailgate with tail lights, and a bump over each rear wheel
   const BED = { a: [-0.5, -0.12] as [number, number], b: [-0.225, 0.225] as [number, number], floor: 0.27, top: 0.39 }
   parts.push({
