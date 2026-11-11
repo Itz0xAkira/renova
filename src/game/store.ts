@@ -7,7 +7,7 @@ import { Sim, type Ent, type SaveData } from './sim'
 
 const SAVE_KEY = 'renova-save-v1'
 
-export type Panel = null | 'research' | 'menu' | 'help'
+export type Panel = null | 'research' | 'menu' | 'help' | 'power'
 
 export type UIState = {
   tool: Kind | null
@@ -21,11 +21,13 @@ export type UIState = {
   zoom: number
   /** Pointer position in screen pixels, for the cursor hint. */
   pointer: [number, number] | null
+  /** Power view: grid coverage and unconnected buildings (key P). */
+  powerView: boolean
 }
 
 export class GameStore {
   sim: Sim
-  ui: UIState = { tool: null, dir: 0, selected: null, speed: 1, paused: false, hover: null, hoverErr: null, panel: null, zoom: 3, pointer: null }
+  ui: UIState = { tool: null, dir: 0, selected: null, speed: 1, paused: false, hover: null, hoverErr: null, panel: null, zoom: 3, pointer: null, powerView: false }
   version = 0
   /** Bumped when a whole new sim replaces the old one, so the scene rebuilds. */
   epoch = 0
@@ -111,6 +113,17 @@ export class GameStore {
     else if (this.ui.tool) this.ui.tool = null
     else if (this.ui.selected) this.ui.selected = null
     else this.ui.panel = 'menu'
+    this.bump()
+  }
+
+  togglePowerView() {
+    this.ui.powerView = !this.ui.powerView
+    this.bump()
+  }
+
+  upgrade(e: Ent) {
+    const err = this.sim.upgrade(e)
+    if (err) this.sim.log(err, 'warn')
     this.bump()
   }
 

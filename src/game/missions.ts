@@ -39,6 +39,12 @@ export const MISSIONS: Mission[] = [
     check: (s) => has(s, 'battery'),
   },
   {
+    title: 'Extend the grid',
+    text: 'Build a power pylon. Buildings only get power inside the core’s or a pylon’s square — press P to see the grid.',
+    tip: 'Pylons link to the core or to each other by cable. Out of reach, they carry nothing.',
+    check: (s) => [...s.ents.values()].some((e) => e.kind === 'pylon' && e.onGrid),
+  },
+  {
     title: 'Metal works',
     text: 'Excavate hematite ore (dark red ground), smelt it and deliver 10 metal to the core.',
     tip: 'Hematite is iron oxide — the rust that makes Mars red.',
@@ -82,6 +88,12 @@ export const MISSIONS: Mission[] = [
     text: 'Build a habitat (key 8) within 2 tiles of a regolith shield (key 9).',
     tip: 'About 2 m of regolith blocks most surface radiation. Supply ships bring crew only if there’s room.',
     check: (s) => [...s.ents.values()].some((e) => e.kind === 'habitat' && e.shielded),
+  },
+  {
+    title: 'Upgrade',
+    text: 'Select any building and upgrade it (U). Try turning a solar panel into an array — and then a station.',
+    tip: 'A solar station plants new panels around itself. Upgrades cost more but save space.',
+    check: (s) => s.upgrades > 0,
   },
   {
     title: 'Colony 001',

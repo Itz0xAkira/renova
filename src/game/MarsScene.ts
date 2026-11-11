@@ -1,7 +1,9 @@
 import Phaser from 'phaser'
-import { ANIMATED, bakeAll, beltKey, isBig, PORT_AX, PORT_AY, PORT_H, PORT_W, CORE_AX, CORE_AY, CORE_H, CORE_W, FRAMES, slabKey, SPR_AX, SPR_AY, SPR_H, SPR_W, TER_H, TER_OX, TER_OY, TER_W, terrainCanvas } from './art'
+import { ANIMATED, bakeAll, bakeTier, beltKey, bKey, isBig, shKey, PORT_AX, PORT_AY, PORT_H, PORT_W, CORE_AX, CORE_AY, CORE_H, CORE_W, FRAMES, slabKey, SPR_AX, SPR_AY, SPR_H, SPR_W, TER_H, TER_OX, TER_OY, TER_W, terrainCanvas } from './art'
 import { BUILDINGS, DI, DJ, MAP, type Dir, type Kind } from './data'
-import { CORE_AT, outTile, outTileFor, SHIELD_RADIUS, type Ent } from './sim'
+import { CORE_AT, outTile, outTileFor, type Ent } from './sim'
+import { PYLON_LINK, PYLON_REACH, SHIELD_REACH } from './data'
+import { PYLON_TOP } from './structures'
 import type { GameStore } from './store'
 import { ROVER_BAYS, Units } from './units'
 
@@ -59,6 +61,13 @@ export class MarsScene extends Phaser.Scene {
   private rangeKey = ''
   /** Footprint outlines under the cursor. */
   private foot!: Phaser.GameObjects.Graphics
+  /** Power cables strung between the core and pylons. */
+  private cables!: Phaser.GameObjects.Graphics
+  /** Grid coverage, shown in the power view and while placing power-related buildings. */
+  private coverage!: Phaser.GameObjects.Graphics
+  private coverageKey = ''
+  /** Upgrade levels whose textures have been baked, as "kind:level". */
+  private tiers = new Set<string>()
   /** Additive copy of the hovered building's sprite, so it lights up. */
   private glow!: Phaser.GameObjects.Image
   private drag: null | { mode: 'place' | 'remove' | 'pan'; last: [number, number] | null; sx: number; sy: number; scrollX: number; scrollY: number; moved: boolean; placed: Set<number> } = null
@@ -78,6 +87,8 @@ export class MarsScene extends Phaser.Scene {
     this.hover = this.add.image(0, 0, 'hover').setDepth(-0.5).setVisible(false)
     this.range = this.add.graphics().setDepth(-0.6)
     this.foot = this.add.graphics().setDepth(-0.55)
+    this.cables = this.add.graphics().setDepth(1.5e6)
+    this.coverage = this.add.graphics().setDepth(-0.58)
     this.glow = this.add.image(0, 0, 'b_solar_0').setBlendMode(Phaser.BlendModes.ADD).setVisible(false)
     this.ghost = this.add.image(0, 0, 'b_solar_0').setAlpha(0.6).setVisible(false)
     this.ghostArrow = this.add.image(0, 0, 'arrow_0').setDepth(1e6).setVisible(false)
@@ -282,6 +293,7 @@ export class MarsScene extends Phaser.Scene {
     if (k.S.isDown || k.DOWN.isDown) cam.scrollY += v
 
     sim.ensureBelts()
+    sim.ensureGrid()
     if (sim.rev !== this.rev) this.syncSprites()
     this.animate()
     this.drawItems()
@@ -327,6 +339,17 @@ export class MarsScene extends Phaser.Scene {
 
   private syncSprites() {
     this.rev = this.store.sim.rev
+    // upgraded buildings: bake their textures the first time each level appears
+    for (const e of this.store.sim.ents.values()) {
+      const key = `${e.kind}:${e.level}`
+      if (e.level > 1 && !this.tiers.has(key)) {
+        this.tiers.add(key)
+        bakeTier((k, cv) => {
+          if (!this.textures.exists(k)) this.textures.addCanvas(k, cv)
+        }, e.kind, e.level)
+      }
+    }
+    this.coverageKey = ''
     const ents = this.store.sim.ents
     for (const [id, s] of this.sprites)
       if (!ents.has(id)) {
@@ -357,6 +380,7 @@ export class MarsScene extends Phaser.Scene {
       if (sk && !this.slabs.has(e.id)) this.slabs.set(e.id, this.add.image(x, cy, sk).setOrigin(ox, oy).setDepth(-0.9))
     }
     this.drawShadows()
+    this.drawCables()
     this.syncPorts()
     this.roadRev = -1 // rover bays depend on what's built in front of the core
     this.units.noticeBuilds(this.store.sim)
@@ -415,32 +439,110 @@ export class MarsScene extends Phaser.Scene {
     }
   }
 
+  /** Where a cable attaches to a grid node, in world px. */
+  private nodeTop(e: Ent): [number, number] {
+    const [x, y] = centreOf(e.kind, e.i, e.j)
+    if (e.kind === 'pylon') return [x, y - 1 - PYLON_TOP[e.level - 1]]
+    return [x + 16, y - 6 - 22] // the antenna on the core's crew module
+  }
+
+  /** Sagging power cables between linked grid nodes, drawn pixel by pixel. */
+  private drawCables() {
+    const g = this.cables
+    g.clear()
+    const sim = this.store.sim
+    for (const [a, b] of sim.links) {
+      const ea = sim.ents.get(a)
+      const eb = sim.ents.get(b)
+      if (!ea || !eb) continue
+      const [x0, y0] = this.nodeTop(ea)
+      const [x1, y1] = this.nodeTop(eb)
+      const len = Math.hypot(x1 - x0, y1 - y0)
+      const sag = Math.min(14, len * 0.08)
+      const n = Math.ceil(len)
+      for (let k = 0; k <= n; k++) {
+        const s = k / n
+        const x = Math.round(x0 + (x1 - x0) * s)
+        const y = Math.round(y0 + (y1 - y0) * s + sag * 4 * s * (1 - s))
+        g.fillStyle(0x151618, 1).fillRect(x, y, 1, 1)
+        if (k % 3 === 0) g.fillStyle(0x3e8da8, 0.9).fillRect(x, y - 1, 1, 1)
+      }
+    }
+  }
+
+  /**
+   * Grid coverage: shown in the power view (P), and automatically while placing
+   * a pylon or anything that uses or makes power. A pylon being placed also
+   * previews its own square and the cables it would string.
+   */
+  private drawCoverage() {
+    const ui = this.store.ui
+    const sim = this.store.sim
+    const tool = ui.tool
+    const def = tool ? BUILDINGS[tool] : null
+    const show = ui.powerView || tool === 'pylon' || (!!def && (def.power > 0 || !!def.gen))
+    const h = ui.hover
+    const key = show ? `${sim.rev}:${tool}:${tool === 'pylon' && h ? h : ''}:${ui.powerView}` : ''
+    if (key === this.coverageKey) return
+    this.coverageKey = key
+    const g = this.coverage
+    g.clear()
+    for (const e of sim.ents.values()) {
+      const s = this.sprites.get(e.id)
+      if (!s || e.kind === 'belt' || e.kind === 'junction') continue
+      const needs = BUILDINGS[e.kind].power > 0 || !!BUILDINGS[e.kind].gen
+      s.setTint(show && needs && !e.onGrid ? 0xff9a8e : 0xffffff)
+    }
+    if (!show) return
+    const tile = (i: number, j: number, color: number, alpha: number) => {
+      const [x, y] = top(i, j)
+      g.fillStyle(color, alpha).fillPoints([new Phaser.Math.Vector2(x, y), new Phaser.Math.Vector2(x + 16, y + 8), new Phaser.Math.Vector2(x, y + 16), new Phaser.Math.Vector2(x - 16, y + 8)], true)
+    }
+    for (let j = 0; j < MAP; j++) for (let i = 0; i < MAP; i++) if (sim.covered[j * MAP + i]) tile(i, j, 0x65c9e8, 0.13)
+    if (tool === 'pylon' && h) {
+      const r = PYLON_REACH[0]
+      for (let j = h[1] - r; j <= h[1] + r; j++) for (let i = h[0] - r; i <= h[0] + r; i++) if (i >= 0 && j >= 0 && i < MAP && j < MAP && !sim.covered[j * MAP + i]) tile(i, j, 0xf4d03f, 0.16)
+      // cables it would string to nodes in reach
+      const [px, py] = top(h[0] + 0.5, h[1] + 0.5)
+      for (const n of sim.ents.values()) {
+        if ((n.kind !== 'pylon' && n.kind !== 'core') || !n.onGrid) continue
+        const ci = n.i + (BUILDINGS[n.kind].w - 1) / 2
+        const cj = n.j + (BUILDINGS[n.kind].h - 1) / 2
+        if (Math.hypot(ci - h[0], cj - h[1]) > Math.max(PYLON_LINK[0], n.kind === 'core' ? 12 : PYLON_LINK[n.level - 1])) continue
+        const [nx, ny] = this.nodeTop(n)
+        g.lineStyle(1, 0xf4d03f, 0.8).lineBetween(px, py - PYLON_TOP[0] - 1, nx, ny)
+      }
+    }
+  }
+
   private drawShadows() {
     const rt = this.shadows
     if (!rt) return
     rt.clear()
     for (const e of this.store.sim.ents.values()) {
       if (e.kind === 'belt' || e.kind === 'junction') continue
-      if (!this.textures.exists(`sh_${e.kind}`)) continue
+      const sk = this.textures.exists(shKey(e.kind, e.level)) ? shKey(e.kind, e.level) : shKey(e.kind, 1)
+      if (!this.textures.exists(sk)) continue
       const [x, cy] = centreOf(e.kind, e.i, e.j)
       const big = isBig(e.kind)
-      rt.stamp(`sh_${e.kind}`, undefined, x - (big ? CORE_AX : SPR_AX), cy - (big ? CORE_AY : SPR_AY), { originX: 0, originY: 0 })
+      rt.stamp(sk, undefined, x - (big ? CORE_AX : SPR_AX), cy - (big ? CORE_AY : SPR_AY), { originX: 0, originY: 0 })
     }
   }
 
   private texFor(e: Ent, f: number) {
     if (e.kind === 'belt') return beltKey(e.dir, e.inMask, e.capEnd, f)
     if (e.kind === 'junction') return `junction_${f}`
+    const L = this.textures.exists(bKey(e.kind, e.level, 0, e.kind === 'melter' ? '_0' : '')) ? e.level : 1
     if (e.kind === 'melter') {
       const w = (e.outBuf.water ?? 0) + (e.crafting ? 1 : 0)
-      return `b_melter_${Math.min(4, Math.floor(w * 0.7))}_${e.working ? f : 0}`
+      return bKey('melter', L, e.working ? f : 0, `_${Math.min(4, Math.floor(w * 0.7))}`)
     }
-    if (e.kind === 'greenhouse') return e.working ? `b_greenhouse_${f}` : `b_greenhouse_dim_0`
-    if (ANIMATED.includes(e.kind) || e.kind === 'habitat' || e.kind === 'shield') {
-      const on = e.working || e.kind === 'solar' || e.kind === 'core' || e.kind === 'battery' || e.kind === 'reactor'
-      return `b_${e.kind}_${on ? f : 0}`
+    if (e.kind === 'greenhouse') return e.working ? bKey('greenhouse', L, f) : bKey('greenhouse', L, 0, '_dim')
+    if (ANIMATED.includes(e.kind) || e.kind === 'habitat' || e.kind === 'shield' || e.kind === 'pylon' || L > 1) {
+      const on = e.working || e.kind === 'solar' || e.kind === 'core' || e.kind === 'battery' || e.kind === 'reactor' || e.kind === 'pylon' || L > 1
+      return bKey(e.kind, L, on ? f : 0)
     }
-    return `b_${e.kind}_0`
+    return bKey(e.kind, 1, 0)
   }
 
   private animate() {
@@ -461,7 +563,7 @@ export class MarsScene extends Phaser.Scene {
       if (!s) continue
       s.setTexture(this.texFor(e, e.kind === 'belt' || e.kind === 'junction' ? beltF : f))
       const st = e.status
-      const show = st === 'nopower' || st === 'noinput' || st === 'blocked' || st === 'unshielded' || st === 'badground'
+      const show = st === 'nopower' || st === 'nogrid' || st === 'noinput' || st === 'blocked' || st === 'unshielded' || st === 'badground'
       let icon = this.icons.get(e.id)
       if (show) {
         if (!icon) {
@@ -599,9 +701,14 @@ export class MarsScene extends Phaser.Scene {
 
     // shield coverage preview, measured from the whole footprint
     let area: [Kind, number, number] | null = null
+    let reach = SHIELD_REACH[0]
     if ((tool === 'shield' || tool === 'habitat') && h) area = [tool, ...anchorFor(tool, h[0], h[1])]
-    else if (sel && (sel.kind === 'shield' || sel.kind === 'habitat')) area = [sel.kind, sel.i, sel.j]
-    const key = area ? `${area}` : ''
+    else if (sel && (sel.kind === 'shield' || sel.kind === 'habitat')) {
+      area = [sel.kind, sel.i, sel.j]
+      if (sel.kind === 'shield') reach = SHIELD_REACH[sel.level - 1]
+    }
+    this.drawCoverage()
+    const key = area ? `${area}:${reach}` : ''
     if (key === this.rangeKey) return
     this.rangeKey = key
     this.range.clear()
@@ -609,8 +716,8 @@ export class MarsScene extends Phaser.Scene {
     const [k, ai, aj] = area
     const { w, h: fh } = BUILDINGS[k]
     this.range.fillStyle(0x7ee07a, 0.18)
-    for (let j = aj - SHIELD_RADIUS; j < aj + fh + SHIELD_RADIUS; j++)
-      for (let i = ai - SHIELD_RADIUS; i < ai + w + SHIELD_RADIUS; i++) {
+    for (let j = aj - reach; j < aj + fh + reach; j++)
+      for (let i = ai - reach; i < ai + w + reach; i++) {
         const [x, y] = top(i, j)
         this.range.fillPoints([new Phaser.Math.Vector2(x, y), new Phaser.Math.Vector2(x + 16, y + 8), new Phaser.Math.Vector2(x, y + 16), new Phaser.Math.Vector2(x - 16, y + 8)], true)
       }

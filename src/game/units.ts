@@ -128,6 +128,12 @@ export class Units {
     this.time += realDt
     let buildings = 0
     for (const e of sim.ents.values()) if (e.kind !== 'belt' && e.kind !== 'core') buildings++
+    while (sim.justUpgraded.length) {
+      const e = sim.ents.get(sim.justUpgraded.shift()!)
+      if (!e) continue
+      const [x, y] = world(e.i + (BUILDINGS[e.kind].w - 1) / 2, e.j + (BUILDINGS[e.kind].h - 1) / 2)
+      this.queue({ x, y: y - 10 })
+    }
     while (sim.newRoads.length) {
       const k = sim.newRoads.shift()!
       const [x, y] = world(k % MAP, Math.floor(k / MAP))

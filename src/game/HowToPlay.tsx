@@ -164,7 +164,7 @@ function pages(art: Art): { title: string; kicker: string; body: ReactNode }[] {
             <Sprite src={art.kinds.battery} label="Battery" />
           </div>
           <P>
-            Solar arrays only work by day. Store the daytime surplus in <B>battery banks</B> to get through the night — the power bar at the top shows how full they are. Low power slows every machine.
+            Power travels by <B>grid</B>: only buildings inside the core’s or a <B>pylon’s</B> square are connected, and pylons link by cable (press <B>P</B> to see it). Solar only works by day, so store the surplus in <B>batteries</B>. When power runs short, <B>life support comes first</B> and the factories slow down. Upgrade buildings with <B>U</B> — a solar station even plants its own panels.
           </P>
           <P>
             <B className="text-[#e0a072]">Dust storms</B> cut solar output for half a sol. <B className="text-[#ff7a6e]">Solar flares</B> blast unshielded habitats with radiation. You get a warning before each one — check the log.
@@ -184,6 +184,8 @@ function pages(art: Art): { title: string; kicker: string; body: ReactNode }[] {
               ['Right-click', 'Remove a building — full refund. Drag to remove many'],
               ['R · Shift+R', 'Rotate the build direction (or the building under the cursor)'],
               ['Q', 'Copy the building under the cursor'],
+              ['U', 'Upgrade the selected building (up to level 3)'],
+              ['P', 'Power view: grid coverage and unconnected buildings'],
               ['1 – 0', 'Quick-select belt, drill, excavator, melter, smelter, kiln, solar, habitat, shield, MOXIE'],
               ['WASD · arrows', 'Pan · mouse wheel or + / − to zoom · C jumps to the core'],
               ['Space', 'Pause · 1× 2× 3× buttons change speed'],

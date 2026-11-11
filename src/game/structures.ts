@@ -213,18 +213,42 @@ export function moxie(ctx: Ctx, x: number, y: number, t: number) {
   lamp(ctx, x, g - 21, (t * 2) % 1 < 0.5 ? RAMP.veg[4] : RAMP.veg[1], RAMP.veg[0])
 }
 
-/** Solar array: three tilted dark-glass panels in rust frames, on a truss plinth. */
-export function solarArray(ctx: Ctx, x: number, y: number, t: number) {
+/**
+ * Solar, by level: a single panel on two posts (1), three panels in rust frames
+ * (2), then a station (3): three steeper panels in cyan frames, an inverter
+ * cabinet and a weather mast with a spinning anemometer.
+ */
+export function solarArray(ctx: Ctx, x: number, y: number, t: number, tier = 1) {
   const g = plinth(ctx, x, y, 1, 1, 4)
   const V = 0.38
-  const lift = (v: number) => 4 + (V - v) * 13 // back edge higher, so panels face the light
+  const steep = tier === 3 ? 16 : 13
+  const lift = (v: number) => 4 + (V - v) * steep
   const at = (u: number, v: number) => [Math.round(x + (u - v) * 16), Math.round(g + (u + v) * 8 - lift(v))] as const
-  const panels: [number, number][] = [
-    [-0.42, -0.16],
-    [-0.13, 0.13],
-    [0.16, 0.42],
-  ]
-  // posts and a cross beam
+  const panels: [number, number][] =
+    tier === 1
+      ? [[-0.3, 0.3]]
+      : [
+          [-0.42, -0.16],
+          [-0.13, 0.13],
+          [0.16, 0.42],
+        ]
+  const frameL = tier === 3 ? CY[4] : R[3]
+  const frameD = tier === 3 ? CY[2] : R[1]
+  if (tier === 3) {
+    // inverter cabinet behind the panels, with a glowing readout
+    const it = hullTop(g - 4, 5, 8)
+    hull(ctx, x + 8, it, 5, 8, M, { roof: MH })
+    faceL(ctx, x + 8, it, 5, 1, 3, 1, 3, cyanWindow(3, 3))
+    // weather mast with a spinning anemometer
+    rect(ctx, x - 9, g - 28, 1, 22, M[3])
+    const a = t * 6
+    for (let k = 0; k < 3; k++) {
+      const ang = a + (k * Math.PI * 2) / 3
+      rect(ctx, x - 9 + Math.round(Math.cos(ang) * 3), g - 28 + Math.round(Math.sin(ang) * 1.2), 1, 1, MH[4])
+    }
+    lamp(ctx, x - 9, g - 30, (t * 1.5) % 1 < 0.4 ? RAMP.alert[4] : RAMP.alert[0], RAMP.alert[1])
+  }
+  // posts
   for (const [u0, u1] of panels) {
     const u = (u0 + u1) / 2
     for (const v of [-V + 0.06, V - 0.06]) {
@@ -241,16 +265,78 @@ export function solarArray(ctx: Ctx, x: number, y: number, t: number) {
       for (let v = -V; v <= V; v += 1 / 48) {
         const [px, py] = at(u, v)
         const frame = u - u0 < 0.025 || u1 - u < 0.025 || Math.abs(v) > V - 0.03
-        const gu = ((u - u0) / (u1 - u0)) * 3
+        const gu = ((u - u0) / (u1 - u0)) * (tier === 1 ? 4 : 3)
         const gv = ((v + V) / (2 * V)) * 5
         const grid = Math.abs(gu - Math.round(gu)) < 0.08 || Math.abs(gv - Math.round(gv)) < 0.08
         let c: string
-        if (frame) c = v > V - 0.03 || u1 - u < 0.025 ? R[1] : R[3]
-        else if (grid) c = RAMP.neutral[1]
-        else c = tone(M, 0.32 + (V - v) * 0.35, px, py)
+        if (frame) c = v > V - 0.03 || u1 - u < 0.025 ? frameD : frameL
+        else if (grid) c = tier === 3 ? CY[1] : RAMP.neutral[1]
+        else c = tone(tier === 3 ? RAMP.navy : M, 0.32 + (V - v) * 0.35, px, py)
         if (!frame && Math.abs(u * 0.6 - v - sweep) < 0.05) c = RAMP.neutral[3]
         rect(ctx, px, py, 1, 1, c)
       }
+  if (tier === 3) for (let k = 0; k < 6; k++) rect(ctx, x - 6 + k * 2, g + 5 - (k >> 1), 1, 1, (t * 3 + k) % 2 < 1 ? GLOW : CY[2])
+}
+
+/** Height above the ground where a pylon's cables attach, by level. */
+export const PYLON_TOP = [26, 32, 38]
+
+/** Power pylon: a lattice mast with a cross-arm and glass insulators; a substation at level 3. */
+export function pylon(ctx: Ctx, x: number, y: number, t: number, tier = 1) {
+  // concrete footing
+  hull(ctx, x, hullTop(y + 1, 6, 2), 6, 2, RAMP.stone, { roof: RAMP.stone })
+  if (tier === 3) {
+    // substation transformer at the foot
+    const tt = hullTop(y + 4, 7, 7)
+    hull(ctx, x - 6, tt, 7, 7, M, { seams: 2, roof: MH })
+    faceL(ctx, x - 6, tt, 7, 0, 7, 0, 1, hazardPx)
+    glowStrip(ctx, x - 9, y - 1, 4)
+  }
+  const H = PYLON_TOP[tier - 1] + 2
+  const by = y - 1
+  const legL = (k: number) => x - 4 + Math.round((k * 3) / H)
+  const legR = (k: number) => x + 3 - Math.round((k * 3) / H)
+  for (let k = 2; k + 5 <= H - 4; k += 5) {
+    line(ctx, legL(k), by - k, legR(k + 5), by - k - 5, M[1])
+    line(ctx, legR(k), by - k, legL(k + 5), by - k - 5, M[2])
+  }
+  for (let k = 0; k <= H; k++) {
+    rect(ctx, legL(k), by - k, 1, 1, MH[3])
+    rect(ctx, legR(k), by - k, 1, 1, M[1])
+  }
+  // cross-arms with hanging insulators
+  const arms = tier === 1 ? [H - 4] : [H - 4, H - 10]
+  for (const ay of arms) {
+    rect(ctx, x - 8, by - ay, 17, 1, MH[3])
+    rect(ctx, x - 8, by - ay + 1, 17, 1, M[1])
+    for (const ix of [-7, 7]) {
+      rect(ctx, x + ix, by - ay + 2, 1, 2, CY[4])
+      rect(ctx, x + ix, by - ay + 4, 1, 1, CY[2])
+    }
+  }
+  lamp(ctx, x, by - H - 1, (t * 2) % 1 < 0.5 ? GLOW : CY[2], CY[1])
+}
+
+/**
+ * Parts an upgrade adds to any building: a back-corner equipment module with a
+ * glowing strip from level 2, and a mast with a beacon at level 3. Drawn behind
+ * the building so it peeks out without covering its face.
+ */
+export function upgradeKit(ctx: Ctx, x: number, y: number, w: number, h: number, t: number, tier: number) {
+  if (tier < 2) return
+  const P = w > 1 || h > 1 ? 6 : 4
+  // back corner of the footprint, pulled in a little, on top of the plinth
+  const bx = Math.round(x + (h - w) * 8 * 0.55)
+  const byy = Math.round(y - (w + h) * 4 * 0.55 - P)
+  const mt = hullTop(byy, 5, 7)
+  hull(ctx, bx, mt, 5, 7, M, { roof: MH })
+  faceL(ctx, bx, mt, 5, 1, 1, 1, 5, (_, r) => (r === 0 ? GLOW : CY[4]))
+  faceR(ctx, bx, mt, 5, 1, 3, 2, 2, ventPx)
+  if (tier < 3) return
+  rect(ctx, bx + 3, mt - 14, 1, 16, M[3])
+  rect(ctx, bx + 4, mt - 13, 1, 15, M[1])
+  dome(ctx, bx + 6, mt - 9, 3, 2, 2, MH, false)
+  lamp(ctx, bx + 3, mt - 16, (t * 1.5) % 1 < 0.4 ? RAMP.alert[4] : RAMP.alert[0], RAMP.alert[1])
 }
 
 export function berm(ctx: Ctx, x: number, y: number, t: number) {

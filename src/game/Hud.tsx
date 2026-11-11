@@ -3,11 +3,11 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { thumbURL } from './art'
-import { BUILD_ORDER, BUILDINGS, HOTKEYS, ITEMS, NEEDS, RESEARCH, SOL, type BuildingDef, type ItemId, type Kind, type StockId } from './data'
+import { BATTERY_KJ_LEVEL, BUILD_ORDER, BUILDINGS, HOTKEYS, ITEMS, MAX_LEVEL, NEEDS, RESEARCH, SOL, STATION_MAX_PLANTS, UPGRADES, type BuildingDef, type ItemId, type Kind, type StockId } from './data'
 import { HowToPlay } from './HowToPlay'
 import { iconURL, type IconName } from './icons'
 import { MISSIONS } from './missions'
-import { BATTERY_KJ, type Ent, type Status } from './sim'
+import { type Ent, type Status } from './sim'
 import type { GameStore } from './store'
 
 /* ------------------------------ design tokens ----------------------------- */
@@ -26,6 +26,7 @@ const STATUS: Record<Status, [string, string]> = {
   ok: ['Running', 'bg-[#7BA750]'],
   idle: ['Idle', 'bg-[#5F5F5F]'],
   nopower: ['No power', 'bg-[#F4D03F]'],
+  nogrid: ['Not connected — build a pylon', 'bg-[#D86B7B]'],
   noinput: ['Waiting for input', 'bg-[#8A8A8A]'],
   blocked: ['Output blocked', 'bg-[#D86B7B]'],
   unshielded: ['Unshielded — radiation!', 'bg-[#F4D03F]'],
@@ -138,6 +139,11 @@ export function Hud({ store }: { store: GameStore }) {
       else if (k === 't' || k === 'T') store.setPanel('research')
       else if (k === 'h' || k === '?') store.setPanel('help')
       else if (k === 'c' || k === 'C') store.centerRequest = true
+      else if (k === 'p' || k === 'P') store.togglePowerView()
+      else if (k === 'u' || k === 'U') {
+        const target = store.selectedEnt() ?? store.hovered()
+        if (target) store.upgrade(target)
+      }
       else if (k === '+' || k === '=') store.zoomRequest = 1
       else if (k === '-' || k === '_') store.zoomRequest = -1
       else if ((k === 'x' || k === 'X' || k === 'Delete') && ui.hover) store.removeAt(ui.hover[0], ui.hover[1])
@@ -161,6 +167,7 @@ export function Hud({ store }: { store: GameStore }) {
       <BottomBar store={store} thumbs={thumbs} />
       {ui.panel === 'research' && <Research store={store} />}
       {ui.panel === 'menu' && <Menu store={store} />}
+      {ui.panel === 'power' && <PowerPanel store={store} />}
       {ui.panel === 'help' && <HowToPlay onClose={() => store.setPanel(null)} doneLabel={store.firstRun ? 'Begin mission' : 'Back to the colony'} />}
       {ui.paused && !ui.panel && !popup && (
         <p className={`${panel} pointer-events-auto absolute left-1/2 top-1/3 flex -translate-x-1/2 items-center gap-2 border-[#C8754D] px-4 py-2 text-xs text-white`}>
@@ -216,6 +223,7 @@ function TopBar({ store }: { store: GameStore }) {
         <Stat icon="crew" label="Crew" value={`${sim.colonists}/${housing}`} tone={sim.colonists >= housing ? 'warn' : undefined} hint="Colonists / beds" />
         <Stat icon="heart" label="Health" value={`${Math.round(sim.health)}%`} tone={sim.health < 50 ? 'bad' : undefined} bar={[sim.health / 100, sim.health < 50 ? '#D86B7B' : '#7BA750']} />
         <Stat
+          onClick={() => store.setPanel('power')}
           icon="power"
           label="Power"
           value={`${Math.round(P.gen)}/${Math.round(P.demand)}`}
@@ -223,7 +231,7 @@ function TopBar({ store }: { store: GameStore }) {
           wide
           tone={sim.shortages.has('power') ? 'bad' : undefined}
           bar={[P.stored / reserve, '#65C9E8']}
-          hint={`Generation / demand. Batteries: ${fmt(P.stored)} of ${fmt(reserve)} kJ`}
+          hint={`Generation / demand. Batteries: ${fmt(P.stored)} of ${fmt(reserve)} kJ. Click for the power panel.`}
         />
         <Stock store={store} id="water" need={need('water')} />
         <Stock store={store} id="food" need={need('food')} />
@@ -272,6 +280,7 @@ function Stat({
   sub,
   hint,
   wide,
+  onClick,
 }: {
   icon: IconName
   label: string
@@ -283,10 +292,18 @@ function Stat({
   hint?: string
   /** For readouts that hold two numbers, like power. */
   wide?: boolean
+  /** Makes the readout a button (the power readout opens the power panel). */
+  onClick?: () => void
 }) {
   // Fixed widths and tabular figures: the bar never shifts as values change.
+  const Tag = onClick ? 'button' : 'div'
   return (
-    <div className={`flex shrink-0 items-center gap-1.5 overflow-hidden px-2 py-1 ${wide ? 'w-[7.25rem]' : 'w-[5.4rem]'}`} title={hint ?? label}>
+    <Tag
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1.5 overflow-hidden px-2 py-1 text-left ${wide ? 'w-[7.25rem]' : 'w-[5.4rem]'} ${onClick ? 'hover:bg-[#2E3033]' : ''}`}
+      title={hint ?? label}
+    >
       <Icon name={icon} size={18} />
       <div className="min-w-0 flex-1 leading-tight">
         <dt className="sr-only">{label}</dt>
@@ -296,7 +313,7 @@ function Stat({
         </dd>
         {bar ? <Bar value={bar[0]} color={bar[1]} className="mt-0.5" /> : <span className="block whitespace-nowrap text-[8px] tabular-nums">{sub ?? <span className={TONE.label}>{label}</span>}</span>}
       </div>
-    </div>
+    </Tag>
   )
 }
 
@@ -385,7 +402,11 @@ function Missions({ store }: { store: GameStore }) {
 
 function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: string }) {
   const { sim } = store
-  const def = BUILDINGS[e.kind]
+  const def = { ...BUILDINGS[e.kind], name: UPGRADES[e.kind]?.names[e.level - 1] ?? BUILDINGS[e.kind].name }
+  const up = UPGRADES[e.kind]
+  const cost = sim.upgradeCost(e)
+  const canPay = !!cost && sim.stock.metal >= cost.metal && sim.stock.brick >= cost.brick
+  const needsGrid = def.power > 0 || !!def.gen
   const [label, dot] = STATUS[e.status]
   const flat = e.kind === 'belt' || e.kind === 'junction'
   return (
@@ -412,6 +433,20 @@ function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: strin
         </button>
       </div>
       <dl className="space-y-1.5 border-t border-[#3F4246] px-2.5 py-2 font-sans text-[11px] normal-case">
+        {up && (
+          <Row
+            k="Level"
+            v={
+              <span className="inline-flex items-center gap-1">
+                {[1, 2, 3].map((n) => (
+                  <span key={n} className={`inline-block h-2 w-3 border border-[#151618] ${n <= e.level ? 'bg-[#65C9E8]' : 'bg-[#2E3033]'}`} />
+                ))}
+                <span className="ml-1">{e.level}/3</span>
+              </span>
+            }
+          />
+        )}
+        {needsGrid && <Row k="Grid" v={e.onGrid ? <span className={TONE.cyan}>Connected</span> : <span className={TONE.bad}>Not connected — build a pylon</span>} />}
         {(def.recipe || def.mines) && <Row k="Makes" v={<Recipe def={def} />} />}
         {def.mines && <Row k="Here" v={e.mineItem ? <Icon name={e.mineItem} size={14} /> : <span className={TONE.bad}>nothing to mine</span>} />}
         {def.recipe && <Row k="Input" v={<Items list={e.inBuf} />} />}
@@ -421,7 +456,7 @@ function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: strin
             k="Power"
             v={
               <span className="inline-flex items-center gap-1">
-                <Icon name="power" size={12} /> {def.power} kW
+                <Icon name="power" size={12} /> {Math.round(sim.draw(e))} kW
               </span>
             }
           />
@@ -431,7 +466,7 @@ function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: strin
             k="Makes"
             v={
               <span className={`inline-flex items-center gap-1 ${TONE.cyan}`}>
-                <Icon name="power" size={12} /> {e.kind === 'solar' ? `${sim.power.solar.toFixed(1)} kW now` : `${def.gen} kW`}
+                <Icon name="power" size={12} /> {e.kind === 'solar' ? `${((sim.power.solar / 20) * [20, 34, 52][e.level - 1]).toFixed(1)} kW now` : `${[120, 170, 240][e.level - 1]} kW`}
               </span>
             }
           />
@@ -441,8 +476,8 @@ function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: strin
             k="Bank"
             v={
               <span className="inline-flex items-center gap-1">
-                <Icon name="battery" size={12} /> {fmt(sim.power.stored)} / {fmt(sim.power.cap + 1000)} kJ
-                <span className={TONE.label}>({BATTERY_KJ} each)</span>
+                <Icon name="battery" size={12} /> {fmt(BATTERY_KJ_LEVEL[e.level - 1])} kJ
+                <span className={TONE.label}>(grid {fmt(sim.power.stored)}/{fmt(sim.power.cap + 1000)})</span>
               </span>
             }
           />
@@ -452,12 +487,15 @@ function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: strin
             k="Crew"
             v={
               <span className="inline-flex items-center gap-1">
-                <Icon name="crew" size={12} /> {e.residents} / {def.housing}
+                <Icon name="crew" size={12} /> {e.residents} / {sim.beds(e)}
               </span>
             }
           />
         )}
         {e.kind === 'habitat' && <Row k="Shielded" v={e.shielded ? <span className={TONE.good}>Yes</span> : <span className={TONE.warn}>No — shield within 2 tiles</span>} />}
+        {e.kind === 'solar' && e.level === MAX_LEVEL && (
+          <Row k="Planted" v={`${e.planted} / ${STATION_MAX_PLANTS} panels · next in ${Math.max(0, Math.ceil(e.plantIn))}s`} />
+        )}
         {e.kind === 'belt' && (
           <Row
             k="Carrying"
@@ -479,6 +517,27 @@ function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: strin
             </div>
           ))}
         </dl>
+      )}
+      {up && cost && (
+        <div className="mx-2.5 mb-2 border border-[#3F4246] bg-[#151618]/60 p-2">
+          <p className="flex items-center justify-between gap-2 text-[10px]">
+            <span className="text-white">→ {up.names[e.level]}</span>
+            <span className={`inline-flex items-center gap-1 ${canPay ? '' : TONE.bad}`}>
+              <Icon name="metal" size={12} />
+              {cost.metal}
+              {cost.brick > 0 && (
+                <>
+                  <Icon name="brick" size={12} />
+                  {cost.brick}
+                </>
+              )}
+            </span>
+          </p>
+          <p className="mt-1 font-sans text-[11px] normal-case text-[#A8B87A]">{up.gains[e.level - 1]}</p>
+          <button type="button" disabled={!canPay} className={`${btn} mt-1.5 w-full justify-center border-[#3E8DA8] text-[#65C9E8]`} onClick={() => store.upgrade(e)}>
+            Upgrade · U
+          </button>
+        </div>
       )}
       <p className="mx-2.5 mb-2 flex gap-1.5 border border-[#3F4246] bg-[#151618]/60 p-1.5 font-sans text-[11px] normal-case leading-snug text-[#E5B07A]">
         <Icon name="tip" size={14} className="mt-0.5" />
@@ -573,6 +632,9 @@ function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<Kind, s
           </button>
           <button type="button" className={btn} onClick={() => (store.zoomRequest = 1)} aria-label="Zoom in">
             +
+          </button>
+          <button type="button" className={`${btn} ${ui.powerView ? btnOn : ''}`} onClick={() => store.togglePowerView()} title="Power view · P">
+            <Icon name="power" size={14} /> Grid · P
           </button>
           <button type="button" className={btn} onClick={() => (store.centerRequest = true)}>
             <Icon name="crew" size={14} /> Core · C
@@ -691,6 +753,119 @@ function Modal({ title, icon, children, onClose, wide }: { title: string; icon?:
         <div className="p-4">{children}</div>
       </div>
     </div>
+  )
+}
+
+/** Power panel: what's making and using power, battery state, and the last few sols on a graph. */
+function PowerPanel({ store }: { store: GameStore }) {
+  const { sim } = store
+  const P = sim.power
+  const reserve = P.cap + 1000
+  const hist = P.history
+  const max = Math.max(10, ...hist.map((h) => Math.max(h.gen, h.demand)))
+  const W = 560
+  const H = 110
+  const pts = (k: 'gen' | 'demand') => hist.map((h, n) => `${(n / Math.max(1, hist.length - 1)) * W},${H - (h[k] / max) * (H - 6)}`).join(' ')
+  const charge = hist.map((h, n) => `${(n / Math.max(1, hist.length - 1)) * W},${H - (h.stored / Math.max(1, h.cap)) * (H - 6)}`).join(' ')
+  const offGrid = [...sim.ents.values()].filter((e) => !e.onGrid && (BUILDINGS[e.kind].power > 0 || !!BUILDINGS[e.kind].gen))
+  const count = (k: Kind) => [...sim.ents.values()].filter((e) => e.kind === k && e.onGrid).length
+  const users = (Object.entries(P.byKind) as [Kind, number][]).sort((a, b) => b[1] - a[1])
+  return (
+    <Modal title="Power grid" icon="power" onClose={() => store.setPanel(null)} wide>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="border border-[#3F4246] bg-[#151618]/60 p-2">
+          <p className={TONE.label}>Generating</p>
+          <p className={`text-lg ${TONE.cyan}`}>{Math.round(P.gen)} kW</p>
+          <p className="font-sans text-[11px] normal-case text-[#BFBFBF]">
+            Solar {Math.round(P.solarGen)} · Reactor {Math.round(P.reactorGen)}
+          </p>
+        </div>
+        <div className="border border-[#3F4246] bg-[#151618]/60 p-2">
+          <p className={TONE.label}>Using</p>
+          <p className={`text-lg ${P.gen < P.demand ? TONE.warn : 'text-white'}`}>{Math.round(P.demand)} kW</p>
+          <p className="font-sans text-[11px] normal-case text-[#BFBFBF]">{P.discharge > 0.5 ? `Batteries supplying ${Math.round(P.discharge)} kW` : 'Running on generation'}</p>
+        </div>
+        <div className="border border-[#3F4246] bg-[#151618]/60 p-2">
+          <p className={`flex items-center gap-1 ${TONE.label}`}>
+            <Icon name="battery" size={12} /> Stored
+          </p>
+          <p className="text-lg text-white">{Math.round((P.stored / reserve) * 100)}%</p>
+          <Bar value={P.stored / reserve} color="#65C9E8" />
+          <p className="mt-1 font-sans text-[11px] normal-case text-[#BFBFBF]">
+            {fmt(P.stored)} / {fmt(reserve)} kJ
+          </p>
+        </div>
+      </div>
+
+      {/* history: generation, demand and battery charge over the last few sols */}
+      <div className="mt-3 border border-[#3F4246] bg-[#151618] p-2">
+        <p className="flex flex-wrap gap-3 text-[9px]">
+          <span className={TONE.cyan}>━ Generation</span>
+          <span className="text-[#C8754D]">━ Demand</span>
+          <span className="text-[#F4D03F]">┅ Battery charge</span>
+          <span className={`ml-auto ${TONE.label}`}>last {Math.round((hist.length * 2) / SOL * 10) / 10} sols</span>
+        </p>
+        <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 h-28 w-full" preserveAspectRatio="none" role="img" aria-label="Power history">
+          {[0.25, 0.5, 0.75].map((f) => (
+            <line key={f} x1={0} x2={W} y1={H * f} y2={H * f} stroke="#2E3033" strokeWidth={1} />
+          ))}
+          {hist.length > 1 && (
+            <>
+              <polyline points={charge} fill="none" stroke="#F4D03F" strokeWidth={1.5} strokeDasharray="4 3" />
+              <polyline points={pts('demand')} fill="none" stroke="#C8754D" strokeWidth={2} />
+              <polyline points={pts('gen')} fill="none" stroke="#65C9E8" strokeWidth={2} />
+            </>
+          )}
+        </svg>
+        {hist.length < 2 && <p className={`text-center ${TONE.label}`}>Collecting data…</p>}
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <p className={`mb-1 ${TONE.label}`}>Priority</p>
+          <p className="flex items-center justify-between gap-2 font-sans text-[11px] normal-case">
+            <span>Life support (core, habitats, MOXIE)</span>
+            <span className={P.lifeSat < 0.99 ? TONE.bad : TONE.good}>{Math.round(P.lifeSat * 100)}%</span>
+          </p>
+          <Bar value={P.lifeSat} color="#7BA750" className="mb-1.5 mt-0.5" />
+          <p className="flex items-center justify-between gap-2 font-sans text-[11px] normal-case">
+            <span>Industry</span>
+            <span className={P.indSat < 0.99 ? TONE.warn : TONE.good}>{Math.round(P.indSat * 100)}%</span>
+          </p>
+          <Bar value={P.indSat} color="#C8754D" className="mt-0.5" />
+          <p className={`mt-2 ${TONE.label}`}>Sources</p>
+          <ul className="mt-1 space-y-0.5 font-sans text-[11px] normal-case">
+            <li>Solar · {count('solar')} on the grid · {P.solar.toFixed(1)} kW per panel now</li>
+            <li>Reactors · {count('reactor')}</li>
+            <li>Batteries · {count('battery')}</li>
+          </ul>
+        </div>
+        <div>
+          <p className={`mb-1 ${TONE.label}`}>Biggest users</p>
+          <ul className="space-y-0.5 font-sans text-[11px] normal-case">
+            {users.length ? (
+              users.slice(0, 7).map(([k, kw]) => (
+                <li key={k} className="flex items-center justify-between gap-2">
+                  <span>{BUILDINGS[k].name}</span>
+                  <span className="text-white">{Math.round(kw)} kW</span>
+                </li>
+              ))
+            ) : (
+              <li className={TONE.label}>Nothing is drawing power.</li>
+            )}
+          </ul>
+          {offGrid.length > 0 && (
+            <p className={`mt-2 flex gap-1.5 border border-[#B03E53] p-1.5 font-sans text-[11px] normal-case ${TONE.bad}`}>
+              <Icon name="warn" size={14} />
+              {offGrid.length} building{offGrid.length === 1 ? ' is' : 's are'} not connected. Build power pylons to reach them.
+            </p>
+          )}
+          <button type="button" className={`${btn} mt-2 ${store.ui.powerView ? btnOn : ''}`} onClick={() => store.togglePowerView()}>
+            <Icon name="power" size={14} /> {store.ui.powerView ? 'Hide' : 'Show'} grid coverage · P
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

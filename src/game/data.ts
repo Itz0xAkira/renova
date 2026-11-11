@@ -45,6 +45,7 @@ export type Kind =
   | 'habitat'
   | 'shield'
   | 'lab'
+  | 'pylon'
 
 export type Recipe = { in: Partial<Record<ItemId, number>>; out: Partial<Record<ItemId, number>>; time: number }
 
@@ -250,13 +251,25 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
   },
   solar: {
     kind: 'solar',
-    name: 'Solar array',
+    name: 'Solar panel',
     short: 'Solar',
-    desc: 'Up to 20 kW in daylight. Nothing at night, much less in dust storms.',
+    desc: 'Up to 20 kW in daylight. Nothing at night, much less in dust storms. Upgrade it into an array, then a station that plants its own panels.',
     fact: 'Mars is 1.5× farther from the Sun than Earth, so a panel there gets only about 43% of the sunlight.',
     cost: { metal: 6 },
     power: 0,
     gen: 20,
+    w: 1,
+    h: 1,
+    group: 'power',
+  },
+  pylon: {
+    kind: 'pylon',
+    name: 'Power pylon',
+    short: 'Pylon',
+    desc: 'Carries power. Buildings in its square get connected; pylons link to the core and to each other by cable.',
+    fact: 'NASA’s Fission Surface Power plan puts the reactor about a kilometre from the base and runs cable in — the distance itself is radiation shielding.',
+    cost: { metal: 4 },
+    power: 0,
     w: 1,
     h: 1,
     group: 'power',
@@ -315,6 +328,7 @@ export const BUILD_ORDER: Kind[] = [
   'habitat',
   'shield',
   'solar',
+  'pylon',
   'battery',
   'reactor',
   'lab',
@@ -396,3 +410,55 @@ export const RESEARCH: ResearchDef[] = [
 
 /** Per colonist, per sol. */
 export const NEEDS = { food: 2, water: 2, o2: 2 }
+
+/* --------------------------------- grid ---------------------------------- */
+
+/** Coverage half-width (tiles beyond the footprint) and cable reach of grid nodes. */
+export const CORE_REACH = 8
+export const CORE_LINK = 12
+
+/* ------------------------------- upgrades -------------------------------- */
+
+export const MAX_LEVEL = 3
+
+/** What upgrading does, per kind. Index 0 is level 1 (as built). */
+export type Upgrade = {
+  names: [string, string, string]
+  /** What each upgrade adds, shown on the button: [to level 2, to level 3]. */
+  gains: [string, string]
+}
+
+const mk = (name: string, gains: [string, string]): Upgrade => ({ names: [name, `${name} Mk II`, `${name} Mk III`], gains })
+
+export const UPGRADES: Partial<Record<Kind, Upgrade>> = {
+  solar: { names: ['Solar panel', 'Solar array', 'Solar station'], gains: ['34 kW: three panels', '52 kW: tracking panels, and it plants new solar panels around itself'] },
+  battery: { names: ['Battery bank', 'Battery stack', 'Grid storage'], gains: ['Stores 6,500 kJ', 'Stores 12,000 kJ'] },
+  reactor: mk('Kilopower reactor', ['170 kW', '240 kW']),
+  pylon: { names: ['Power pylon', 'Power tower', 'Substation'], gains: ['Wider coverage and longer cables', 'Widest coverage and longest cables'] },
+  drill: mk('Ice drill', ['50% faster', '120% faster']),
+  excavator: mk('Excavator', ['50% faster', '120% faster']),
+  melter: mk('Ice melter', ['50% faster', '120% faster']),
+  smelter: mk('Smelter', ['50% faster', '120% faster']),
+  kiln: mk('Sinter kiln', ['50% faster', '120% faster']),
+  washer: mk('Soil washer', ['50% faster', '120% faster']),
+  greenhouse: mk('Greenhouse', ['50% faster', '120% faster']),
+  moxie: mk('MOXIE', ['50% more oxygen', '120% more oxygen']),
+  lab: mk('Research lab', ['50% more research', '120% more research']),
+  habitat: mk('Habitat', ['Houses 8', 'Houses 10']),
+  shield: mk('Regolith shield', ['Protects within 3 tiles', 'Protects within 4 tiles']),
+}
+
+/** Work-speed multiplier by level, and the extra power that speed costs. */
+export const SPEED = [1, 1.5, 2.2]
+export const POWER_SCALE = [1, 1.3, 1.6]
+export const SOLAR_KW = [20, 34, 52]
+export const BATTERY_KJ_LEVEL = [3000, 6500, 12000]
+export const REACTOR_KW = [120, 170, 240]
+export const HABITAT_BEDS = [6, 8, 10]
+export const SHIELD_REACH = [2, 3, 4]
+export const PYLON_REACH = [4, 6, 8]
+export const PYLON_LINK = [9, 12, 16]
+/** A solar station plants a new panel this often (game seconds), up to this many around it. */
+export const STATION_PLANT_EVERY = 25
+export const STATION_MAX_PLANTS = 8
+

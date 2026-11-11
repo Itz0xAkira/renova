@@ -3,6 +3,21 @@
  * stepped headless, saved to JSON and rendered by anything.
  */
 import {
+  BATTERY_KJ_LEVEL,
+  CORE_LINK,
+  CORE_REACH,
+  HABITAT_BEDS,
+  MAX_LEVEL,
+  POWER_SCALE,
+  PYLON_LINK,
+  PYLON_REACH,
+  REACTOR_KW,
+  SHIELD_REACH,
+  SOLAR_KW,
+  SPEED,
+  STATION_MAX_PLANTS,
+  STATION_PLANT_EVERY,
+  UPGRADES,
   BUILDINGS,
   DI,
   DJ,
@@ -20,7 +35,7 @@ import {
 } from './data'
 import { MISSIONS } from './missions'
 
-export type Status = 'ok' | 'nopower' | 'noinput' | 'blocked' | 'unshielded' | 'badground' | 'idle'
+export type Status = 'ok' | 'nopower' | 'nogrid' | 'noinput' | 'blocked' | 'unshielded' | 'badground' | 'idle'
 
 /** An item on a belt. `from` is the side it entered from, when it came in round a corner or merge curve. */
 export type BeltItem = { item: ItemId; pos: number; from?: Dir }
@@ -55,6 +70,13 @@ export type Ent = {
   inMask: number
   /** Junctions only: one lane of items per travel direction. */
   lanes: BeltItem[][]
+  /** Upgrade level, 1–3. */
+  level: number
+  /** Connected to the colony's power grid. */
+  onGrid: boolean
+  /** Solar stations: seconds until the next panel is planted, and how many it has planted. */
+  plantIn: number
+  planted: number
   /** Belts only: nothing feeds the back, so the start is closed off. */
   capStart: boolean
   /** Belts only: the output leads nowhere that will take items. */
@@ -70,6 +92,9 @@ const GAP = 0.3
 const BELT_SPEED = 1.5
 const OUT_CAP = 6
 export const BATTERY_KJ = 3000
+
+/** Life support gets power before industry when there isn't enough. */
+const LIFE = new Set<Kind>(['core', 'habitat', 'moxie'])
 export const SHIELD_RADIUS = 2
 
 const mulberry = (a: number) => () => {
@@ -164,7 +189,7 @@ export type SaveData = {
   current: ResearchId | null
   mission: number
   delivered: Record<ItemId, number>
-  ents: [Kind, number, number, Dir][]
+  ents: [Kind, number, number, Dir, number?][]
   ev: Sim['ev']
   won: boolean
   /** Ground wear from rovers and crew, as sparse [tile index, wear] pairs. */
@@ -189,7 +214,23 @@ export class Sim {
   health = 100
   owed: Record<'food' | 'water' | 'o2', number> = { food: 0, water: 0, o2: 0 }
   shortages = new Set<Shortage>()
-  power = { gen: 0, demand: 0, sat: 1, stored: 1000, cap: 0, solar: 0 }
+  power = {
+    gen: 0,
+    demand: 0,
+    sat: 1,
+    stored: 1000,
+    cap: 0,
+    /** kW one level-1 panel makes right now. */
+    solar: 0,
+    solarGen: 0,
+    reactorGen: 0,
+    discharge: 0,
+    lifeSat: 1,
+    indSat: 1,
+    byKind: {} as Partial<Record<Kind, number>>,
+    history: [] as { gen: number; demand: number; stored: number; cap: number }[],
+    lastSample: -99,
+  }
   rp = 0
   done = new Set<ResearchId>()
   current: ResearchId | null = 'washing'
@@ -250,7 +291,7 @@ export class Sim {
   }
   housing() {
     let h = 0
-    for (const e of this.ents.values()) h += BUILDINGS[e.kind].housing ?? 0
+    for (const e of this.ents.values()) h += this.beds(e)
     return h
   }
   count(kind: Kind) {
@@ -310,6 +351,10 @@ export class Sim {
       curve: null,
       inMask: 0,
       lanes: [[], [], [], []],
+      level: 1,
+      onGrid: false,
+      plantIn: STATION_PLANT_EVERY,
+      planted: 0,
       capStart: true,
       capEnd: true,
     }
@@ -399,7 +444,7 @@ export class Sim {
       // distance from the shield to the nearest tile of the habitat's footprint
       const { w, h } = BUILDINGS[e.kind]
       const gap = (s: Ent) => Math.max(Math.max(0, e.i - s.i, s.i - (e.i + w - 1)), Math.max(0, e.j - s.j, s.j - (e.j + h - 1)))
-      e.shielded = shields.some((s) => gap(s) <= SHIELD_RADIUS)
+      e.shielded = shields.some((s) => gap(s) <= SHIELD_REACH[s.level - 1])
     }
   }
 
@@ -458,6 +503,115 @@ export class Sim {
     return true
   }
 
+  /* ------------------------------ levels ------------------------------- */
+
+  /** Work-speed multiplier from a building's level. */
+  speed(e: Ent) {
+    return SPEED[e.level - 1]
+  }
+  /** kW a building draws while active. */
+  draw(e: Ent) {
+    return BUILDINGS[e.kind].power * POWER_SCALE[e.level - 1]
+  }
+  beds(e: Ent) {
+    if (e.kind === 'habitat') return HABITAT_BEDS[e.level - 1]
+    return BUILDINGS[e.kind].housing ?? 0
+  }
+  batteryKJ(e: Ent) {
+    return BATTERY_KJ_LEVEL[e.level - 1]
+  }
+
+  /** Materials to take a building to its next level, or null at the top. */
+  upgradeCost(e: Ent): { metal: number; brick: number } | null {
+    if (!UPGRADES[e.kind] || e.level >= MAX_LEVEL) return null
+    const c = BUILDINGS[e.kind].cost
+    const k = e.level === 1 ? 1.5 : 2.5
+    return { metal: Math.ceil((c.metal ?? 0) * k) + (e.level === 1 ? 4 : 10), brick: Math.ceil((c.brick ?? 0) * k) + (e.level === 2 ? 6 : 0) }
+  }
+
+  upgrade(e: Ent): string | null {
+    const cost = this.upgradeCost(e)
+    if (!cost) return 'Already fully upgraded'
+    if (this.stock.metal < cost.metal || this.stock.brick < cost.brick) return 'Not enough materials'
+    this.stock.metal -= cost.metal
+    this.stock.brick -= cost.brick
+    e.level++
+    this.rev++
+    this.upgrades++
+    this.justUpgraded.push(e.id)
+    const name = UPGRADES[e.kind]!.names[e.level - 1]
+    this.log(`Upgraded to ${name}.`, 'good')
+    if (e.kind === 'shield' || e.kind === 'habitat') this.updateShielding()
+    return null
+  }
+
+  /** Total upgrades made, for the mission log. */
+  upgrades = 0
+  /** Buildings just upgraded, for a drone to come and fit the new parts. */
+  justUpgraded: number[] = []
+
+  /* ------------------------------- grid -------------------------------- */
+
+  private gridRev = -1
+  /** Which tiles are inside the power grid's coverage. */
+  covered = new Uint8Array(MAP * MAP)
+  /** Cable links between grid nodes (core and pylons), as entity id pairs. */
+  links: [number, number][] = []
+
+  /** Coverage half-width (beyond the footprint) and cable reach of a grid node. */
+  nodeReach(e: Ent) {
+    return e.kind === 'core' ? CORE_REACH : PYLON_REACH[e.level - 1]
+  }
+  nodeLink(e: Ent) {
+    return e.kind === 'core' ? CORE_LINK : PYLON_LINK[e.level - 1]
+  }
+
+  /**
+   * Rebuild the grid: pylons join it when a cable reaches the core or another
+   * joined pylon; every building with any tile inside a joined node's square is
+   * connected. Pylons out of reach form no grid at all.
+   */
+  ensureGrid() {
+    if (this.gridRev === this.rev) return
+    this.gridRev = this.rev
+    const nodes = [...this.ents.values()].filter((e) => e.kind === 'core' || e.kind === 'pylon')
+    const centre = (e: Ent) => [e.i + (BUILDINGS[e.kind].w - 1) / 2, e.j + (BUILDINGS[e.kind].h - 1) / 2] as const
+    const core = nodes.find((n) => n.kind === 'core')!
+    const joined = new Set<Ent>([core])
+    const queue = [core]
+    this.links = []
+    while (queue.length) {
+      const a = queue.shift()!
+      const [ai, aj] = centre(a)
+      for (const b of nodes) {
+        if (joined.has(b)) continue
+        const [bi, bj] = centre(b)
+        if (Math.hypot(ai - bi, aj - bj) <= Math.max(this.nodeLink(a), this.nodeLink(b))) {
+          joined.add(b)
+          queue.push(b)
+          this.links.push([a.id, b.id])
+        }
+      }
+    }
+    this.covered.fill(0)
+    for (const n of joined) {
+      const r = this.nodeReach(n)
+      const { w, h } = BUILDINGS[n.kind]
+      for (let j = n.j - r; j < n.j + h + r; j++)
+        for (let i = n.i - r; i < n.i + w + r; i++) if (i >= 0 && j >= 0 && i < MAP && j < MAP) this.covered[j * MAP + i] = 1
+    }
+    for (const e of this.ents.values()) {
+      if (e.kind === 'pylon' || e.kind === 'core') {
+        e.onGrid = joined.has(e)
+        continue
+      }
+      const { w, h } = BUILDINGS[e.kind]
+      let on = false
+      for (let dj = 0; dj < h && !on; dj++) for (let di = 0; di < w && !on; di++) on = this.covered[(e.j + dj) * MAP + e.i + di] === 1
+      e.onGrid = on
+    }
+  }
+
   /** Research that speeds machines up. */
   private boost(kind: Kind) {
     if (kind === 'washer' && this.done.has('washing')) return 2
@@ -509,43 +663,72 @@ export class Sim {
     this.time += dt
     const beltV = BELT_SPEED * (this.done.has('maglev') ? 1.75 : 1) * dt
 
-    // 1 · who wants power this tick
-    let demand = 0
-    let solar = 0
-    let reactors = 0
-    let batteries = 0
+    // 1 · who wants power this tick, split into life support and industry
+    this.ensureGrid()
+    let lifeDemand = 0
+    let indDemand = 0
+    let gen = 0
+    let solarGen = 0
+    let cap = 0
+    const dust = this.ev.storm && this.time >= this.ev.storm.start ? (this.done.has('dustproof') ? 0.6 : 0.25) : 1
+    const solarFactor = this.sun() * dust * (this.done.has('dustproof') ? 1.3 : 1)
+    const byKind: Partial<Record<Kind, number>> = {}
     for (const e of this.ents.values()) {
       const def = BUILDINGS[e.kind]
-      if (e.kind === 'solar') solar++
-      else if (e.kind === 'reactor') reactors++
-      else if (e.kind === 'battery') batteries++
       if (def.mines) e.active = !!e.mineItem && this.outTotal(e) < OUT_CAP
       else if (def.recipe) e.active = e.crafting ? e.progress < 1 : this.hasInputs(e) && this.outTotal(e) < OUT_CAP
       else if (e.kind === 'lab') e.active = !!this.current
       else e.active = def.power > 0
-      if (e.active) demand += def.power
+      if (!e.onGrid) continue
+      if (e.kind === 'solar') {
+        const kw = SOLAR_KW[e.level - 1] * solarFactor
+        gen += kw
+        solarGen += kw
+      } else if (e.kind === 'reactor') gen += REACTOR_KW[e.level - 1]
+      else if (e.kind === 'battery') cap += this.batteryKJ(e)
+      if (e.active && def.power > 0) {
+        const kw = this.draw(e)
+        if (LIFE.has(e.kind)) lifeDemand += kw
+        else indDemand += kw
+        byKind[e.kind] = (byKind[e.kind] ?? 0) + kw
+      }
     }
 
-    // 2 · power balance with batteries as the buffer
-    const dust = this.ev.storm && this.time >= this.ev.storm.start ? (this.done.has('dustproof') ? 0.6 : 0.25) : 1
-    const solarEach = 20 * this.sun() * dust * (this.done.has('dustproof') ? 1.3 : 1)
-    const gen = solar * solarEach + reactors * 120
-    const cap = batteries * BATTERY_KJ
+    // 2 · power balance: life support first, then industry; batteries buffer both
     const P = this.power
-    P.cap = cap
     const reserveCap = cap + 1000 // the core carries a small 1,000 kJ reserve
+    P.cap = cap
     P.stored = Math.min(P.stored, reserveCap)
+    const demand = lifeDemand + indDemand
     P.gen = gen
-    P.solar = solarEach
+    P.solar = SOLAR_KW[0] * solarFactor
     P.demand = demand
-    if (gen >= demand) {
-      P.sat = 1
-      P.stored = Math.min(reserveCap, P.stored + (gen - demand) * dt)
-    } else {
-      const need = (demand - gen) * dt
-      const draw = Math.min(need, P.stored)
+    P.byKind = byKind
+    P.solarGen = solarGen
+    P.reactorGen = gen - solarGen
+    let supply = gen * dt
+    if (gen < demand) {
+      const draw = Math.min((demand - gen) * dt, P.stored)
       P.stored -= draw
-      P.sat = demand > 0 ? (gen * dt + draw) / (demand * dt) : 1
+      supply += draw
+      P.discharge = draw / dt
+    } else {
+      P.stored = Math.min(reserveCap, P.stored + (gen - demand) * dt)
+      P.discharge = 0
+    }
+    const lifeNeed = lifeDemand * dt
+    const lifeSat = lifeNeed > 0 ? Math.min(1, supply / lifeNeed) : 1
+    const left = Math.max(0, supply - lifeNeed)
+    const indSat = indDemand > 0 ? Math.min(1, left / (indDemand * dt)) : 1
+    P.sat = demand > 0 ? Math.min(1, supply / (demand * dt)) : 1
+    P.lifeSat = lifeSat
+    P.indSat = indSat
+    const satFor = (e: Ent) => (!e.onGrid ? 0 : LIFE.has(e.kind) ? lifeSat : indSat)
+    // a sample every 2 s for the power graph (about three sols of history)
+    if (this.time - P.lastSample >= 2) {
+      P.lastSample = this.time
+      P.history.push({ gen, demand, stored: P.stored, cap: reserveCap })
+      if (P.history.length > 180) P.history.shift()
     }
     const sat = P.sat
 
@@ -555,10 +738,12 @@ export class Sim {
       if (e.kind === 'belt' || e.kind === 'junction') continue
       const def = BUILDINGS[e.kind]
       e.working = false
+      const sat = def.power > 0 ? satFor(e) : 1
+      const spd = this.speed(e)
       if (def.mines) {
         if (!e.mineItem) e.status = 'badground'
         else if (e.active) {
-          e.progress += (dt * sat) / def.mineTime!
+          e.progress += (dt * sat * spd) / def.mineTime!
           e.working = sat > 0
           if (e.progress >= 1) {
             e.progress -= 1
@@ -574,9 +759,9 @@ export class Sim {
         }
         if (e.crafting) {
           if (e.progress < 1) {
-            e.progress = Math.min(1, e.progress + (dt * sat * this.boost(e.kind)) / r.time)
+            e.progress = Math.min(1, e.progress + (dt * sat * spd * this.boost(e.kind)) / r.time)
             e.working = sat > 0
-            if (e.kind === 'greenhouse') o2 += 0.04 * dt * sat
+            if (e.kind === 'greenhouse') o2 += 0.04 * dt * sat * spd
           }
           if (e.progress >= 1 && this.outTotal(e) < OUT_CAP) {
             for (const k in r.out) e.outBuf[k as ItemId] = (e.outBuf[k as ItemId] ?? 0) + r.out[k as ItemId]!
@@ -585,10 +770,10 @@ export class Sim {
           }
         }
       } else if (e.kind === 'moxie') {
-        o2 += 0.1 * dt * sat
+        o2 += 0.1 * dt * sat * spd
         e.working = sat > 0
       } else if (e.kind === 'lab' && this.current) {
-        this.rp += 0.4 * dt * sat
+        this.rp += 0.4 * dt * sat * spd
         e.working = sat > 0
       } else if (e.kind === 'core' && this.current) {
         this.rp += 0.12 * dt * sat
@@ -606,6 +791,7 @@ export class Sim {
 
       // status
       if (e.kind === 'habitat') e.status = e.residents > 0 && !e.shielded ? 'unshielded' : e.shielded ? 'ok' : 'idle'
+      else if ((def.power > 0 || def.gen) && !e.onGrid) e.status = 'nogrid'
       else if (def.power > 0 && e.active && sat < 0.5) e.status = 'nopower'
       else if (def.mines && e.mineItem) e.status = this.outTotal(e) >= OUT_CAP ? 'blocked' : 'ok'
       else if (def.recipe) e.status = this.outTotal(e) >= OUT_CAP ? 'blocked' : !e.crafting && !this.hasInputs(e) ? 'noinput' : 'ok'
@@ -650,6 +836,7 @@ export class Sim {
       }
     }
 
+    this.stations(dt)
     this.lifeSupport(dt, sat)
     this.events()
     this.missions()
@@ -673,16 +860,41 @@ export class Sim {
     }
   }
 
+  /** Solar stations slowly plant new panels on open, connected ground around them. */
+  private stations(dt: number) {
+    for (const e of [...this.ents.values()]) {
+      if (e.kind !== 'solar' || e.level < MAX_LEVEL || e.planted >= STATION_MAX_PLANTS) continue
+      e.plantIn -= dt
+      if (e.plantIn > 0) continue
+      e.plantIn = STATION_PLANT_EVERY
+      if (this.stock.metal < (BUILDINGS.solar.cost.metal ?? 0)) continue
+      const spots: [number, number][] = []
+      for (let r = 1; r <= 2 && !spots.length; r++)
+        for (let dj = -r; dj <= r; dj++)
+          for (let di = -r; di <= r; di++) {
+            if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue
+            const i = e.i + di
+            const j = e.j + dj
+            if (!this.placeError('solar', i, j) && this.covered[j * MAP + i]) spots.push([i, j])
+          }
+      if (!spots.length) continue
+      const [i, j] = spots[Math.floor(this.rng() * spots.length)]
+      this.place('solar', i, j, 0)
+      e.planted++
+      if (e.planted === 1) this.log('A solar station has started planting its own panels around it.', 'good')
+    }
+  }
+
   private lifeSupport(dt: number, sat: number) {
     // assign residents: core first, then habitats
     let left = this.colonists
     const core = [...this.ents.values()].find((e) => e.kind === 'core')!
-    core.residents = Math.min(left, BUILDINGS.core.housing!)
+    core.residents = Math.min(left, this.beds(core))
     left -= core.residents
     let unshieldedResidents = 0
     for (const e of this.ents.values()) {
       if (e.kind !== 'habitat') continue
-      e.residents = Math.min(left, BUILDINGS.habitat.housing!)
+      e.residents = Math.min(left, this.beds(e))
       left -= e.residents
       if (e.residents && !e.shielded) unshieldedResidents += e.residents
     }
@@ -700,7 +912,7 @@ export class Sim {
         this.shortages.add(r)
       }
     }
-    if (sat < 0.5) this.shortages.add('power')
+    if (this.power.lifeSat < 0.5) this.shortages.add('power')
     const flare = this.ev.flare && this.time >= this.ev.flare.start
     if (unshieldedResidents > 0) this.shortages.add('radiation')
 
@@ -801,7 +1013,7 @@ export class Sim {
       current: this.current,
       mission: this.mission,
       delivered: { ...this.delivered },
-      ents: [...this.ents.values()].filter((e) => e.kind !== 'core').map((e) => [e.kind, e.i, e.j, e.dir]),
+      ents: [...this.ents.values()].filter((e) => e.kind !== 'core').map((e) => [e.kind, e.i, e.j, e.dir, e.level]),
       ev: { ...this.ev },
       won: this.won,
       wear: [...this.wear].flatMap((w, k) => (w ? [[k, w] as [number, number]] : [])),
@@ -829,9 +1041,9 @@ export class Sim {
       for (let dj = 0; dj < h; dj++) for (let di = 0; di < w; di++) if (!s.groundAt(i + di, j + dj) || s.entAt(i + di, j + dj)) return false
       return true
     }
-    for (const [k, i, j, dir] of d.ents) {
+    for (const [k, i, j, dir, level] of d.ents) {
       if (!BUILDINGS[k]) continue
-      if (fits(k, i, j)) s.add(k, i, j, dir)
+      if (fits(k, i, j)) s.add(k, i, j, dir).level = Math.min(MAX_LEVEL, Math.max(1, level ?? 1))
       else {
         s.stock.metal += BUILDINGS[k].cost.metal ?? 0
         s.stock.brick += BUILDINGS[k].cost.brick ?? 0

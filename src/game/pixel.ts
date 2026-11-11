@@ -238,7 +238,17 @@ export const stencilPx = (seed: number) => (c: number, r: number) => {
  * P px tall: a grated top with a rust trim ring, and cross-braced truss walls.
  * Returns the y of its top surface's centre, where the building stands.
  */
-export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P = 5, trim: Ramp = RAMP.rust) {
+/** Upgrade level of the building being drawn; plinth trim and level pips follow it. */
+let TIER = 1
+export const setTier = (n: number) => {
+  TIER = n
+}
+export const getTier = () => TIER
+/** Plinth trim by level: rust, then hazard yellow, then glowing cyan. */
+const TIER_TRIM = [RAMP.rust, RAMP.signal, RAMP.cyan] as const
+
+export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P = 5, trimOverride?: Ramp) {
+  const trim = trimOverride ?? TIER_TRIM[TIER - 1]
   const inset = 0.06
   const at = (px: number, py: number) => {
     const dx = px + 0.5 - cx
@@ -283,6 +293,15 @@ export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P
         break
       }
     }
+  // level pips on the front-left edge: one light per upgrade
+  if (TIER > 1) {
+    const fy = cy + (w + h) * 4 - P
+    for (let k = 0; k < TIER; k++) {
+      const px = frontX - 5 - k * 4
+      const py = fy - ((frontX - px) >> 1) + 2
+      rect(ctx, px, py, 2, 1, k === TIER - 1 ? GLOW : RAMP.cyan[3])
+    }
+  }
   return cy - P
 }
 

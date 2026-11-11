@@ -4,8 +4,8 @@
  */
 import { box, C, cliffColumn, cylinder, diamond, diamondOutline, dome, drawObject, ellipseRows, hash, rect, rover, speckle, walker, type Ctx } from '@/site/pixel/engine'
 import { BUILDINGS, DI, DJ, ITEMS, MAP, type Dir, type Ground, type ItemId, type Kind } from './data'
-import { GLOW, INK, RAMP as PAL } from './pixel'
-import { battery, berm, bigGreenhouse, bigHabitat, bigKiln, bigLab, bigReactor, bigSmelter, bigWasher, coreBuilding, excavator, iceDrill, melter, moxie, rocket, solarArray } from './structures'
+import { GLOW, INK, RAMP as PAL, setTier } from './pixel'
+import { battery, berm, bigGreenhouse, bigHabitat, bigKiln, bigLab, bigReactor, bigSmelter, bigWasher, coreBuilding, excavator, iceDrill, melter, moxie, pylon, rocket, solarArray, upgradeKit } from './structures'
 
 export const FRAMES = 8
 /**
@@ -60,8 +60,21 @@ export const slabKey = (k: Kind): string | null => {
   return null // every building now stands on its own plinth, drawn as part of its sprite
 }
 
-export function drawKind(ctx: Ctx, kind: Kind, x: number, y: number, t: number, opt: { dim?: boolean; level?: number; noSlab?: boolean } = {}) {
+export function drawKind(ctx: Ctx, kind: Kind, x: number, y: number, t: number, opt: { dim?: boolean; level?: number; noSlab?: boolean; tier?: number } = {}) {
+  const tier = opt.tier ?? 1
+  setTier(tier)
+  try {
+    if (tier > 1 && kind !== 'solar' && kind !== 'pylon' && kind !== 'excavator' && kind !== 'shield') upgradeKit(ctx, x, y, BUILDINGS[kind].w, BUILDINGS[kind].h, t, tier)
+    drawKindInner(ctx, kind, x, y, t, opt, tier)
+  } finally {
+    setTier(1)
+  }
+}
+
+function drawKindInner(ctx: Ctx, kind: Kind, x: number, y: number, t: number, opt: { dim?: boolean; level?: number }, tier: number) {
   switch (kind) {
+    case 'pylon':
+      return pylon(ctx, x, y, t, tier)
     case 'drill':
       return iceDrill(ctx, x, y, t)
     case 'excavator':
@@ -83,7 +96,7 @@ export function drawKind(ctx: Ctx, kind: Kind, x: number, y: number, t: number, 
     case 'shield':
       return berm(ctx, x, y, t)
     case 'solar':
-      return solarArray(ctx, x, y, t)
+      return solarArray(ctx, x, y, t, tier)
     case 'battery':
       return battery(ctx, x, y, t)
     case 'reactor':
@@ -428,6 +441,10 @@ const ICONS: Record<string, { art: string[]; pal: Record<string, string> }> = {
     art: ['.yyyy.', 'yk..ky', 'y.kk.y', 'y.kk.y', 'yk..ky', '.yyyy.'],
     pal: { y: '#ffd24a', k: '#141c2b' },
   },
+  nogrid: {
+    art: ['.y..y.', '.y..y.', 'yyyyyy', 'yyyyyy', '.yyyy.', '..yy..', '..r...'],
+    pal: { y: '#d86b7b', r: '#ffd24a' },
+  },
   badground: {
     art: ['rr..rr', '.rrrr.', '..rr..', '.rrrr.', 'rr..rr'],
     pal: { r: '#ff5a4f' },
@@ -699,7 +716,7 @@ function shadowOf(cv: HTMLCanvasElement) {
 const SPEC = (big: boolean) => ({ W: big ? CORE_W : SPR_W, H: big ? CORE_H : SPR_H, ax: big ? CORE_AX : SPR_AX, ay: big ? CORE_AY : SPR_AY })
 
 /** The bare structure: lit, no slab, no outline. */
-function structure(kind: Kind, t: number, opt: { dim?: boolean; level?: number } = {}) {
+function structure(kind: Kind, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
   const big = isBig(kind)
   const { W, H, ax, ay } = SPEC(big)
   const layer = canvas(W, H, (ctx) => drawKind(ctx, kind, ax, ay, t, { ...opt, noSlab: true }))
@@ -732,7 +749,7 @@ function lit(w: number, h: number, ax: number, ay: number, draw: (ctx: Ctx) => v
 }
 
 /** A finished building sprite: dark outline plus the lit structure. Slab and shadow live on the ground layer. */
-function buildingCanvas(kind: Kind, t: number, opt: { dim?: boolean; level?: number } = {}) {
+function buildingCanvas(kind: Kind, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
   const { W, H } = SPEC(isBig(kind))
   const layer = structure(kind, t, opt)
   return canvas(W, H, (ctx) => {
@@ -745,8 +762,23 @@ export type TextureSink = (key: string, cv: HTMLCanvasElement) => void
 
 export const ANIMATED: Kind[] = ['drill', 'excavator', 'smelter', 'kiln', 'washer', 'moxie', 'solar', 'battery', 'reactor', 'lab', 'core']
 
+/** Texture key for a building frame. Level 1 keeps the original names; upgrades add `_T<n>`. `variant` is `_dim` or a melter's `_<water level>`. */
+export const bKey = (kind: Kind, tier: number, f: number, variant = '') => (tier === 1 ? `b_${kind}${variant}_${f}` : `b_${kind}_T${tier}${variant}_${f}`)
+export const shKey = (kind: Kind, tier: number) => (tier === 1 ? `sh_${kind}` : `sh_${kind}_T${tier}`)
+
+/** Bake every frame of an upgraded building. Done on demand, the first time one appears. */
+export function bakeTier(add: TextureSink, kind: Kind, tier: number) {
+  for (let f = 0; f < FRAMES; f++) {
+    const t = (f / FRAMES) * 2
+    if (kind === 'melter') for (let L = 0; L < 5; L++) add(bKey(kind, tier, f, `_${L}`), buildingCanvas(kind, t, { level: 0.1 + L * 0.2, tier }))
+    else add(bKey(kind, tier, f), buildingCanvas(kind, t, { tier }))
+    if (kind === 'greenhouse') add(bKey(kind, tier, f, '_dim'), buildingCanvas(kind, t, { dim: true, tier }))
+  }
+  add(shKey(kind, tier), shadowOf(structure(kind, 0, { level: 0.5, tier })))
+}
+
 export function bakeAll(add: TextureSink) {
-  const kinds: Kind[] = ['drill', 'excavator', 'melter', 'smelter', 'kiln', 'washer', 'greenhouse', 'moxie', 'habitat', 'shield', 'solar', 'battery', 'reactor', 'lab']
+  const kinds: Kind[] = ['drill', 'excavator', 'melter', 'smelter', 'kiln', 'washer', 'greenhouse', 'moxie', 'habitat', 'shield', 'solar', 'pylon', 'battery', 'reactor', 'lab']
   for (const k of kinds) {
     for (let f = 0; f < FRAMES; f++) {
       const t = (f / FRAMES) * 2
