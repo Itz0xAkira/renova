@@ -138,6 +138,7 @@ export class MarsScene extends Phaser.Scene {
     this.units.update(sim, simDt, delta / 1000, {
       shadowAlpha: 0.08 + 0.32 * sun,
       daytime: sun > 0.15,
+      night: Math.max(0, Math.min(1, 1 - sun * 4)),
       flare: !!sim.ev.flare && sim.time >= sim.ev.flare.start,
       storm: !!sim.ev.storm && sim.time >= sim.ev.storm.start,
     })

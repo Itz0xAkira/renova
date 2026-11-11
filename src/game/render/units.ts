@@ -5,12 +5,16 @@
  * - rovers drive between the core and your buildings, preferring roads;
  * - crew walk out to work at buildings by day and head inside at night and
  *   during solar flares.
+ * Rovers accelerate and brake, face where they drive, queue behind each other,
+ * haul ore home in their hopper, kick up dust off-road, blink a beacon (cyan
+ * while charging in a bay) and light the ground ahead at night.
  * Rovers and crew wear the ground as they go: busy routes become tyre tracks,
  * then roads (stored in the sim, so they're saved). The units themselves are
  * cosmetic and aren't saved.
  */
 import Phaser from 'phaser'
-import { BUILDINGS, MAP } from '@/game/core/data'
+import { BEAM_AX, BEAM_AY, BEAM_H, BEAM_W, ROVER_AX, ROVER_AY, ROVER_H, ROVER_SH_H, ROVER_SH_W, ROVER_W, ROVER_WHEEL_FRAMES, roverKey, roverPoint } from '@/game/art/sprites'
+import { BUILDINGS, MAP, type Dir } from '@/game/core/data'
 import { CORE_AT, type Ent, type Sim } from '@/game/core/sim'
 import { setDep, setTex } from '@/game/render/display'
 import { centreX, centreY, DEPTH, unitDepth } from '@/game/render/iso'
@@ -32,7 +36,6 @@ const DRONE_PADS: [number, number][] = [
   [7, -8],
 ]
 const PAD_ALT = 6 + 3
-const ROVER_FRAMES = ['rover_0', 'rover_1']
 const WALKER_FRAMES = ['walker_0', 'walker_1']
 
 /** Rover charging bays: the open tiles along the core's two front edges. */
@@ -42,9 +45,19 @@ export const ROVER_BAYS: [number, number][] = [
   [CORE_AT, CORE_AT + 2],
   [CORE_AT + 1, CORE_AT + 2],
 ]
+const DIR_I = [1, 0, -1, 0] as const
+const DIR_J = [0, 1, 0, -1] as const
 const DRONE_SPEED = 90 // world px per second
 const DRONE_ALT = 26
 const ROVER_SPEED = 1.5 // tiles per second, off-road
+const ROVER_ACCEL = 2.2 // tiles per second², speeding up
+const ROVER_BRAKE = 3 // tiles per second², slowing for a stop or a turn
+/** How fast the wheels turn: wheel frames per tile driven. */
+const WHEEL_FRAMES_PER_TILE = 9
+const MAX_ROVERS = 6
+const DUST_POOL = 48
+const BEACON_AMBER = 0xffb347
+const BEACON_CYAN = 0x65c9e8
 const WALK_SPEED = 0.7
 const ROAD_BOOST = 1.6
 /** Shadows fall down-right, matching the buildings: offset per px of height. */
@@ -77,9 +90,27 @@ type Mover = {
   /** Walkers only: heading inside to end their shift. */
   leaving?: boolean
   lastTile: number
+  /** Rovers only. */
+  rover?: RoverState
 }
 
-export type Env = { shadowAlpha: number; daytime: boolean; flare: boolean; storm: boolean }
+type RoverState = {
+  beacon: Phaser.GameObjects.Image
+  beam: Phaser.GameObjects.Image
+  dir: Dir
+  /** Current speed, tiles per second. */
+  v: number
+  /** Distance driven, for turning the wheels. */
+  odo: number
+  /** Hauling ore home. */
+  loaded: boolean
+  /** Seconds spent waiting for another rover to clear the way. */
+  blocked: number
+  dust: number
+  phase: number
+}
+
+export type Env = { shadowAlpha: number; daytime: boolean; flare: boolean; storm: boolean; /** 0 by day … 1 at full night. */ night: number }
 
 export class Units {
   private drones: Drone[] = []
@@ -88,6 +119,7 @@ export class Units {
   private jobs: Job[] = []
   private known = new Set<number>()
   private sparks: Phaser.GameObjects.Image[] = []
+  private dust: { img: Phaser.GameObjects.Image; t: number; life: number; vx: number; vy: number }[] = []
   private time = 0
 
   constructor(private scene: Phaser.Scene) {}
@@ -97,11 +129,9 @@ export class Units {
       u.img.destroy()
       u.sh.destroy()
     }
-    for (const list of [this.rovers, this.crew])
-      for (const u of list) {
-        u.img.destroy()
-        u.sh.destroy()
-      }
+    for (const list of [this.rovers, this.crew]) for (const u of list) this.destroyMover(u)
+    for (const d of this.dust) d.img.destroy()
+    this.dust = []
     for (const s of this.sparks) {
       this.scene.tweens.killTweensOf(s)
       s.destroy()
@@ -151,19 +181,19 @@ export class Units {
       this.queue({ x: centreX(i, j), y: centreY(i, j) - 2, pave: true })
     }
     this.ensureDrones(Math.min(6, 2 + Math.floor(buildings / 8)))
-    this.ensureMovers(sim, this.rovers, Math.min(4, 1 + Math.floor(buildings / 5)), 'rover')
+    this.ensureMovers(sim, this.rovers, Math.min(MAX_ROVERS, 1 + Math.floor(buildings / 5)), 'rover')
     // crew go out by day in fair weather; at night, in flares and with nobody left they stay inside
     const outside = sim.colonists > 0 && env.daytime && !env.flare ? Math.min(10, Math.max(1, Math.floor(sim.colonists * 0.4)) - (env.storm ? 1 : 0)) : 0
     this.ensureMovers(sim, this.crew, outside, 'walker')
     this.updateDrones(dt, realDt, env)
-    for (const r of this.rovers) this.step(sim, r, dt, ROVER_SPEED, 'rover', env)
+    for (const r of this.rovers) this.driveRover(sim, r, dt, env)
     for (const w of this.crew) this.step(sim, w, dt, WALK_SPEED, 'walker', env)
+    this.updateDust(realDt)
     // walkers who've reached the core at the end of their shift go inside
     for (let k = this.crew.length - 1; k >= 0; k--) {
       const w = this.crew[k]
       if (!w.leaving || w.path.length || w.wait > 0) continue
-      w.img.destroy()
-      w.sh.destroy()
+      this.destroyMover(w)
       this.crew.splice(k, 1)
     }
   }
@@ -288,7 +318,7 @@ export class Units {
    * grows along the routes the colony actually uses. (Dial's algorithm: edge
    * costs are small integers, so a ring of buckets replaces a priority queue.)
    */
-  private route(sim: Sim, si: number, sj: number, goals: Set<number>): [number, number][] | null {
+  private route(sim: Sim, si: number, sj: number, goals: Set<number>, avoid?: Set<number>): [number, number][] | null {
     const N = MAP * MAP
     const dist = new Int32Array(N).fill(0x7fffffff)
     const prev = new Int32Array(N).fill(-1)
@@ -320,6 +350,7 @@ export class Units {
           const nj = uj + dj
           if (ni < 0 || nj < 0 || ni >= MAP || nj >= MAP || !this.passable(sim, ni, nj)) continue
           const v = nj * MAP + ni
+          if (avoid?.has(v)) continue
           const nd = cur + (sim.roadLevel(ni, nj) === 2 ? 2 : 3)
           if (nd < dist[v]) {
             dist[v] = nd
@@ -372,16 +403,39 @@ export class Units {
       if (!spots.length) return
       const s = spots[Math.floor(Math.random() * spots.length)]
       const rover = kind === 'rover'
-      list.push({
-        img: this.scene.add.image(0, 0, rover ? 'rover_0' : 'walker_0').setOrigin(rover ? 11 / 22 : 6 / 12, rover ? 19 / 22 : 13 / 15),
-        sh: this.scene.add.image(0, 0, rover ? 'rover_sh' : 'walker_sh').setOrigin(rover ? 11 / 36 : 6 / 22, rover ? 19 / 30 : 13 / 20).setDepth(DEPTH.unitShadow),
-        fi: s % MAP,
-        fj: Math.floor(s / MAP),
-        path: [],
-        wait: 0.3 + list.length * 0.7,
-        toCore: false,
-        lastTile: s,
-      })
+      const m: Mover = rover
+        ? {
+            img: this.scene.add.image(0, 0, roverKey(0, 0, false)).setOrigin(ROVER_AX / ROVER_W, ROVER_AY / ROVER_H),
+            sh: this.scene.add.image(0, 0, 'rover_sh_0').setOrigin(ROVER_AX / ROVER_SH_W, ROVER_AY / ROVER_SH_H).setDepth(DEPTH.unitShadow),
+            fi: s % MAP,
+            fj: Math.floor(s / MAP),
+            path: [],
+            wait: 0.3 + list.length * 0.7,
+            toCore: false,
+            lastTile: s,
+            rover: {
+              beacon: this.scene.add.image(0, 0, 'rover_beacon').setBlendMode(Phaser.BlendModes.ADD),
+              beam: this.scene.add.image(0, 0, 'rover_beam_0').setOrigin(BEAM_AX / BEAM_W, BEAM_AY / BEAM_H).setBlendMode(Phaser.BlendModes.ADD).setDepth(DEPTH.unitShadow + 0.01),
+              dir: 0,
+              v: 0,
+              odo: 0,
+              loaded: false,
+              blocked: 0,
+              dust: 0,
+              phase: Math.random() * 10,
+            },
+          }
+        : {
+            img: this.scene.add.image(0, 0, 'walker_0').setOrigin(6 / 12, 13 / 15),
+            sh: this.scene.add.image(0, 0, 'walker_sh').setOrigin(6 / 22, 13 / 20).setDepth(DEPTH.unitShadow),
+            fi: s % MAP,
+            fj: Math.floor(s / MAP),
+            path: [],
+            wait: 0.3 + list.length * 0.7,
+            toCore: false,
+            lastTile: s,
+          }
+      list.push(m)
     }
   }
 
@@ -407,7 +461,16 @@ export class Units {
         goals = this.around(sim, e.i, e.j, BUILDINGS[e.kind].w, BUILDINGS[e.kind].h)
       }
     }
-    const path = goals.size ? this.route(sim, here[0], here[1], goals) : null
+    // rovers steer round other rovers that are parked, and don't pick a spot one is parked on
+    let avoid: Set<number> | undefined
+    if (rover) {
+      avoid = new Set()
+      for (const r of this.rovers) if (r !== m && !r.path.length) avoid.add(Math.round(r.fj) * MAP + Math.round(r.fi))
+      for (const k of avoid) goals.delete(k)
+      // heading home after a visit means a full hopper
+      m.rover!.loaded = m.toCore && !m.leaving && this.visited(sim, here[0], here[1])
+    }
+    const path = goals.size ? this.route(sim, here[0], here[1], goals, avoid) : null
     m.path = path ?? []
     if (!m.leaving) m.toCore = !m.toCore
     m.wait = path ? 0 : 2
@@ -454,9 +517,180 @@ export class Units {
     const y = Math.round(centreY(m.fi, m.fj))
     const moving = m.path.length > 0 && dt > 0
     const frame = moving ? Math.floor(this.time * (rover ? 8 : 5)) % 2 : 0
-    setTex(m.img, rover ? ROVER_FRAMES[frame] : WALKER_FRAMES[frame]).setPosition(x, y)
+    setTex(m.img, WALKER_FRAMES[frame]).setPosition(x, y)
     setDep(m.img, unitDepth(m.fi, m.fj))
     m.sh.setPosition(x, y).setAlpha(env.shadowAlpha)
+  }
+
+  /** Is (i, j) beside a building (somewhere a rover would have picked something up)? */
+  private visited(sim: Sim, i: number, j: number) {
+    for (const [di, dj] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const e = sim.entAt(i + di, j + dj)
+      if (e && e.kind !== 'belt' && e.kind !== 'junction' && e.kind !== 'core') return true
+    }
+    return false
+  }
+
+  /** Tiles left to drive on the current path, counting the part-done one. */
+  private remaining(m: Mover) {
+    if (!m.path.length) return 0
+    const [ti, tj] = m.path[0]
+    return Math.hypot(ti - m.fi, tj - m.fj) + m.path.length - 1
+  }
+
+  /** Is another rover sitting on, or driving into, tile (i, j)? */
+  private occupied(m: Mover, i: number, j: number) {
+    for (const r of this.rovers) {
+      if (r === m) continue
+      if (Math.round(r.fi) === i && Math.round(r.fj) === j) return true
+      // two rovers about to swap tiles: the one further along waits
+      const next = r.path[0]
+      if (next && next[0] === i && next[1] === j && Math.hypot(r.fi - i, r.fj - j) < Math.hypot(m.fi - i, m.fj - j)) return true
+    }
+    return false
+  }
+
+  private driveRover(sim: Sim, m: Mover, dt: number, env: Env) {
+    const R = m.rover!
+    let moved = 0
+    if (!m.path.length) {
+      R.v = 0
+      m.wait -= dt
+      if (m.wait <= 0) this.plan(sim, m, 'rover')
+    } else {
+      const [ti, tj] = m.path[0]
+      if (!this.passable(sim, ti, tj)) {
+        // something got built in the way: re-route
+        m.path = []
+        m.toCore = !m.toCore
+        m.wait = 0.3
+      } else if (this.occupied(m, ti, tj) && Math.hypot(ti - m.fi, tj - m.fj) > 0.55) {
+        // queue behind the rover ahead; if it doesn't move, find another way
+        R.v = Math.max(0, R.v - ROVER_BRAKE * 2 * dt)
+        R.blocked += dt
+        if (R.blocked > 1.5) {
+          R.blocked = 0
+          m.path = []
+          m.toCore = !m.toCore
+          m.wait = 0.2 + Math.random() * 0.5
+        }
+      } else {
+        R.blocked = 0
+        const di = ti - m.fi
+        const dj = tj - m.fj
+        const dist = Math.hypot(di, dj)
+        const onRoad = sim.roadLevel(Math.round(m.fi), Math.round(m.fj)) === 2
+        // brake for the stop at the end, and ease off for a corner coming up
+        const turn = m.path.length > 1 && (m.path[1][0] - ti !== Math.sign(di) || m.path[1][1] - tj !== Math.sign(dj))
+        const top = ROVER_SPEED * (onRoad ? ROAD_BOOST : 1)
+        const stopCap = Math.sqrt(2 * ROVER_BRAKE * this.remaining(m)) + 0.15
+        const turnCap = turn ? 0.6 + Math.sqrt(2 * ROVER_BRAKE * dist) : Infinity
+        const want = Math.min(top, stopCap, turnCap)
+        R.v = R.v < want ? Math.min(want, R.v + ROVER_ACCEL * dt) : Math.max(want, R.v - ROVER_BRAKE * dt)
+        const stepLen = R.v * dt
+        if (dist > 0.01) R.dir = (Math.abs(di) >= Math.abs(dj) ? (di > 0 ? 0 : 2) : dj > 0 ? 1 : 3) as Dir
+        if (dist <= stepLen) {
+          m.fi = ti
+          m.fj = tj
+          m.path.shift()
+          moved = dist
+          if (!m.path.length) {
+            // unloading at home takes a little longer than loading
+            m.wait = R.loaded ? 2 + Math.random() : 1.2 + Math.random()
+            if (R.loaded && this.atCore(m)) R.loaded = false
+          }
+        } else {
+          m.fi += (di / dist) * stepLen
+          m.fj += (dj / dist) * stepLen
+          moved = stepLen
+        }
+        const k = Math.round(m.fj) * MAP + Math.round(m.fi)
+        if (k !== m.lastTile) {
+          m.lastTile = k
+          sim.addWear(Math.round(m.fi), Math.round(m.fj))
+        }
+        // dust off bare ground, more in a storm and the faster it goes
+        if (!onRoad && sim.roadLevel(Math.round(m.fi), Math.round(m.fj)) < 2) {
+          R.dust += moved * (env.storm ? 9 : 5)
+          while (R.dust >= 1) {
+            R.dust -= 1
+            this.puff(m)
+          }
+        }
+      }
+    }
+    R.odo += moved
+    const frame = Math.floor(R.odo * WHEEL_FRAMES_PER_TILE) % ROVER_WHEEL_FRAMES
+    // a little suspension bounce on rough ground
+    const bump = moved > 0 && sim.roadLevel(Math.round(m.fi), Math.round(m.fj)) < 2 && Math.floor(R.odo * 6 + R.phase) % 3 === 0 ? 1 : 0
+    const x = Math.round(centreX(m.fi, m.fj))
+    const y = Math.round(centreY(m.fi, m.fj))
+    setTex(m.img, roverKey(R.dir, frame, R.loaded)).setPosition(x, y - bump)
+    const depth = unitDepth(m.fi, m.fj)
+    setDep(m.img, depth)
+    setTex(m.sh, `rover_sh_${R.dir}`).setPosition(x, y).setAlpha(env.shadowAlpha)
+
+    // beacon: amber blink while driving, slow cyan pulse while charging in a bay, dim when parked elsewhere
+    const [bx, by] = roverPoint(R.dir, 'beacon')
+    const charging = !m.path.length && ROVER_BAYS.some(([i, j]) => Math.round(m.fi) === i && Math.round(m.fj) === j)
+    const t = this.time + R.phase
+    const glow = m.path.length ? (Math.floor(t * 2.5) % 2 ? 1 : 0.15) : charging ? 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 2.4)) : 0.25
+    R.beacon
+      .setPosition(x + bx, y + by - bump)
+      .setTint(charging ? BEACON_CYAN : BEACON_AMBER)
+      .setAlpha(glow * (0.55 + 0.45 * env.night))
+    setDep(R.beacon, depth + 0.001)
+    // headlights pool on the ground ahead after dark
+    setTex(R.beam, `rover_beam_${R.dir}`).setPosition(x, y).setVisible(env.night > 0.05 && m.path.length > 0).setAlpha(0.7 * env.night)
+  }
+
+  private puff(m: Mover) {
+    const R = m.rover!
+    let p = this.dust.find((d) => d.t >= d.life)
+    if (!p) {
+      if (this.dust.length >= DUST_POOL) return
+      p = { img: this.scene.add.image(0, 0, 'dust'), t: 0, life: 1, vx: 0, vy: 0 }
+      this.dust.push(p)
+    }
+    // from behind the rear wheels, drifting back and up
+    const bi = -DIR_I[R.dir] * 0.3
+    const bj = -DIR_J[R.dir] * 0.3
+    const side = (Math.random() - 0.5) * 0.4
+    const fi = m.fi + bi + DIR_J[R.dir] * side
+    const fj = m.fj + bj - DIR_I[R.dir] * side
+    p.img.setPosition(centreX(fi, fj), centreY(fi, fj) - 1).setVisible(true).setScale(0.6).setAlpha(0.55)
+    setDep(p.img, unitDepth(fi, fj) - 0.002)
+    p.t = 0
+    p.life = 0.5 + Math.random() * 0.4
+    p.vx = (centreX(bi, bj) - centreX(0, 0)) * 0.8 + (Math.random() - 0.5) * 6
+    p.vy = -6 - Math.random() * 6
+  }
+
+  private updateDust(dt: number) {
+    for (const p of this.dust) {
+      if (p.t >= p.life) continue
+      p.t += dt
+      const k = Math.min(1, p.t / p.life)
+      if (k >= 1) {
+        p.img.setVisible(false)
+        continue
+      }
+      p.img.x += p.vx * dt
+      p.img.y += p.vy * dt
+      p.img.setScale(0.6 + k * 0.9).setAlpha(0.55 * (1 - k))
+    }
+  }
+
+  private destroyMover(m: Mover) {
+    m.img.destroy()
+    m.sh.destroy()
+    m.rover?.beacon.destroy()
+    m.rover?.beam.destroy()
   }
 
   private atCore(m: Mover) {

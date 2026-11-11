@@ -8,7 +8,7 @@
  * This file draws buildings per tier, bakes everything into textures and
  * makes the HUD's thumbnails. It re-exports the rest, so callers import from here.
  */
-import { box, C, diamond, diamondOutline, ellipseRows, rect, rover, walker, type Ctx } from '@/site/pixel/engine'
+import { box, C, diamond, diamondOutline, ellipseRows, rect, walker, type Ctx } from '@/site/pixel/engine'
 import { BUILDINGS, ITEMS, type Dir, type ItemId, type Kind } from '@/game/core/data'
 import { setTier } from '@/game/art/pixel'
 import { battery, berm, bigGreenhouse, bigHabitat, bigKiln, bigLab, bigReactor, bigSmelter, bigWasher, coreBuilding, excavator, iceDrill, melter, moxie, pylon, rocket, solarArray, upgradeKit } from '@/game/art/structures'
@@ -17,8 +17,13 @@ import { canvas, FRAMES, line } from '@/game/art/canvas'
 export { FRAMES } from '@/game/art/canvas'
 import { arrowCanvas, bayCanvas, beltCanvas, beltKey, itemCanvas, junctionCanvas, PORT_AX, PORT_AY, PORT_H, PORT_W, portCanvas, roadCanvas } from '@/game/art/logistics'
 import { lit, outlineOf, shadeLayer, shadowOf } from '@/game/art/passes'
+import { beaconCanvas, beamCanvas, dustCanvas, ROVER_H, ROVER_W, ROVER_WHEEL_FRAMES, roverCanvas, roverShadowCanvas } from '@/game/art/rovers'
 
 export { beltKey, PORT_AX, PORT_AY, PORT_H, PORT_W } from '@/game/art/logistics'
+export { BEAM_AX, BEAM_AY, BEAM_H, BEAM_W, ROVER_AX, ROVER_AY, ROVER_H, ROVER_SH_H, ROVER_SH_W, ROVER_W, ROVER_WHEEL_FRAMES, roverPoint } from '@/game/art/rovers'
+
+/** Texture key for a rover frame. */
+export const roverKey = (dir: Dir, frame: number, loaded: boolean) => `rover_${dir}_${frame}${loaded ? '_l' : ''}`
 export { groundURL, skyCanvas, terrainCanvas, TER_H, TER_OX, TER_OY, TER_W } from '@/game/art/terrain'
 
 /**
@@ -259,9 +264,18 @@ export function bakeAll(add: TextureSink) {
     rect(ctx, 1, 0, 1, 3, '#fff3c4')
     rect(ctx, 0, 1, 3, 1, '#fff3c4')
   }))
-  // rover: two suspension-bob frames, wheels touching the ground at (11, 16); flip in Phaser for the other heading
-  for (let f = 0; f < 2; f++) add(`rover_${f}`, lit(22, 22, 11, 16, (ctx) => rover(ctx, 11, 16 - f, false)))
-  add('rover_sh', shadowOf(lit(36, 30, 11, 16, (ctx) => rover(ctx, 11, 16, false))))
+  // rovers: every heading, wheel frame and load, already lit; outlined like everything else
+  for (const d of [0, 1, 2, 3] as Dir[]) {
+    for (const loaded of [false, true])
+      for (let f = 0; f < ROVER_WHEEL_FRAMES; f++) {
+        const body = roverCanvas(d, f, loaded)
+        add(roverKey(d, f, loaded), canvas(ROVER_W, ROVER_H, (ctx) => (ctx.drawImage(outlineOf(body), 0, 0), ctx.drawImage(body, 0, 0))))
+      }
+    add(`rover_sh_${d}`, roverShadowCanvas(d))
+    add(`rover_beam_${d}`, beamCanvas(d))
+  }
+  add('rover_beacon', beaconCanvas())
+  add('dust', dustCanvas())
   add('ship', lit(26, 66, 13, 59, (ctx) => rocket(ctx, 13, 59, 0)))
   add('flame', canvas(10, 14, (ctx) => {
     ellipseRows(ctx, 5, 5, 4, 5, C.orange)
