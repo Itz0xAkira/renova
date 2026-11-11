@@ -3,27 +3,121 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { thumbURL } from './art'
+import { BUILD_ORDER, BUILDINGS, HOTKEYS, ITEMS, NEEDS, RESEARCH, SOL, type BuildingDef, type ItemId, type Kind, type StockId } from './data'
 import { HowToPlay } from './HowToPlay'
-import { BUILD_ORDER, BUILDINGS, HOTKEYS, ITEMS, NEEDS, RESEARCH, SOL, type ItemId, type Kind, type StockId } from './data'
+import { iconURL, type IconName } from './icons'
 import { MISSIONS } from './missions'
 import { BATTERY_KJ, type Ent, type Status } from './sim'
 import type { GameStore } from './store'
 
-const panel = 'border-2 border-star/15 bg-[#0c1220]/88 backdrop-blur-[2px]'
-const btn = 'border-2 border-star/30 bg-[#0c1220]/88 px-2.5 py-1.5 uppercase transition-colors hover:border-mars hover:text-mars disabled:opacity-40 disabled:hover:border-star/30 disabled:hover:text-star'
+/* ------------------------------ design tokens ----------------------------- */
+// Gunmetal panels with a lit top edge, rust and cyan accents — the same palette as the buildings.
+
+const panel = 'border border-[#3F4246] bg-[#1F2022]/95 shadow-[inset_0_1px_0_#5A5D60,0_3px_0_rgba(0,0,0,0.45)]'
+const btn =
+  'flex items-center gap-1.5 border border-[#3F4246] bg-[#2E3033] px-2 py-1.5 uppercase text-[#D9D9D9] shadow-[inset_0_1px_0_#5A5D60] transition-colors hover:border-[#C8754D] hover:text-white active:translate-y-px disabled:opacity-40'
+const btnOn = 'border-[#C8754D] bg-[#A95738]/35 text-white'
+const TONE = { label: 'text-[#8A8A8A]', good: 'text-[#A8B87A]', bad: 'text-[#D86B7B]', warn: 'text-[#F4D03F]', cyan: 'text-[#65C9E8]' }
 
 const fmt = (n: number) => (Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)}k` : Math.floor(n).toString())
-const signed = (n: number) => `${n >= 0 ? '+' : '−'}${Math.abs(n).toFixed(0)}`
+const signed = (n: number) => `${n >= 0 ? '▲' : '▼'}${Math.abs(n).toFixed(0)}`
 
 const STATUS: Record<Status, [string, string]> = {
-  ok: ['Running', 'text-[#7ee07a]'],
-  idle: ['Idle', 'text-star/60'],
-  nopower: ['No power', 'text-[#ffd24a]'],
-  noinput: ['Waiting for input', 'text-star/70'],
-  blocked: ['Output blocked', 'text-[#ff7a6e]'],
-  unshielded: ['Unshielded — radiation!', 'text-[#ffd24a]'],
-  badground: ['Wrong ground', 'text-[#ff7a6e]'],
+  ok: ['Running', 'bg-[#7BA750]'],
+  idle: ['Idle', 'bg-[#5F5F5F]'],
+  nopower: ['No power', 'bg-[#F4D03F]'],
+  noinput: ['Waiting for input', 'bg-[#8A8A8A]'],
+  blocked: ['Output blocked', 'bg-[#D86B7B]'],
+  unshielded: ['Unshielded — radiation!', 'bg-[#F4D03F]'],
+  badground: ['Wrong ground', 'bg-[#D86B7B]'],
 }
+
+const CATEGORY: { id: BuildingDef['group']; name: string; icon: IconName }[] = [
+  { id: 'logistics', name: 'Logistics', icon: 'logistics' },
+  { id: 'extract', name: 'Mining', icon: 'extract' },
+  { id: 'process', name: 'Processing', icon: 'process' },
+  { id: 'life', name: 'Life support', icon: 'life' },
+  { id: 'power', name: 'Power', icon: 'power' },
+  { id: 'science', name: 'Science', icon: 'science' },
+]
+
+export function Icon({ name, size = 18, className = '' }: { name: IconName; size?: number; className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={iconURL(name)} alt="" width={size} height={size} className={`pixelated inline-block shrink-0 ${className}`} style={{ width: size, height: size }} />
+}
+
+function Bar({ value, color, className = '' }: { value: number; color: string; className?: string }) {
+  return (
+    <span className={`block h-1.5 border border-[#151618] bg-[#151618] ${className}`}>
+      <span className="block h-full" style={{ width: `${Math.max(0, Math.min(1, value)) * 100}%`, background: color, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25)' }} />
+    </span>
+  )
+}
+
+/** Item counts as icons: 2 [ore] + 1 [water]. */
+function Items({ list }: { list: Partial<Record<ItemId, number>> }) {
+  const entries = Object.entries(list).filter(([, n]) => (n ?? 0) > 0) as [ItemId, number][]
+  if (!entries.length) return <span className={TONE.label}>—</span>
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {entries.map(([k, n], i) => (
+        <span key={k} className="inline-flex items-center gap-0.5" title={ITEMS[k].name}>
+          {i > 0 && <span className={TONE.label}>+</span>}
+          <span>{n}</span>
+          <Icon name={k} size={14} />
+        </span>
+      ))}
+    </span>
+  )
+}
+
+function Recipe({ def }: { def: BuildingDef }) {
+  if (def.recipe)
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <Items list={def.recipe.in} />
+        <span className="text-[#C8754D]">→</span>
+        <Items list={def.recipe.out} />
+        <span className={TONE.label}>· {def.recipe.time}s</span>
+      </span>
+    )
+  if (def.mines)
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        {Object.entries(def.mines).map(([g, item]) => (
+          <span key={g} className="inline-flex items-center gap-1">
+            <span className={TONE.label}>{g}</span>
+            <span className="text-[#C8754D]">→</span>
+            <Icon name={item as ItemId} size={14} />
+          </span>
+        ))}
+      </span>
+    )
+  return null
+}
+
+function Cost({ def, poor }: { def: BuildingDef; poor?: boolean }) {
+  const c = def.cost
+  if (!c.metal && !c.brick) return <span className={TONE.label}>free</span>
+  return (
+    <span className={`inline-flex items-center gap-1 ${poor ? TONE.bad : ''}`}>
+      {c.metal ? (
+        <span className="inline-flex items-center gap-0.5">
+          <Icon name="metal" size={12} />
+          {c.metal}
+        </span>
+      ) : null}
+      {c.brick ? (
+        <span className="inline-flex items-center gap-0.5">
+          <Icon name="brick" size={12} />
+          {c.brick}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+/* ---------------------------------- HUD ---------------------------------- */
 
 export function Hud({ store }: { store: GameStore }) {
   const { sim, ui } = store
@@ -58,19 +152,19 @@ export function Hud({ store }: { store: GameStore }) {
   const popup = sim.popups[0]
 
   return (
-    <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-2 p-2 text-[10px] uppercase sm:p-3">
+    <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-2 p-2 text-[10px] uppercase text-[#D9D9D9] sm:p-3">
       <TopBar store={store} />
       <div className="flex min-h-0 flex-1 items-start justify-between gap-2">
         <Missions store={store} />
-        {inspect && <Inspector store={store} e={inspect} />}
+        {inspect && <Inspector store={store} e={inspect} thumb={thumbs[inspect.kind] ?? thumbURL(inspect.kind)} />}
       </div>
       <BottomBar store={store} thumbs={thumbs} />
       {ui.panel === 'research' && <Research store={store} />}
       {ui.panel === 'menu' && <Menu store={store} />}
       {ui.panel === 'help' && <HowToPlay onClose={() => store.setPanel(null)} doneLabel={store.firstRun ? 'Begin mission' : 'Back to the colony'} />}
       {ui.paused && !ui.panel && !popup && (
-        <p className="pointer-events-auto absolute left-1/2 top-1/3 -translate-x-1/2 border-2 border-mars bg-[#0c1220]/90 px-4 py-2 text-xs text-mars">
-          Paused · space to resume
+        <p className={`${panel} pointer-events-auto absolute left-1/2 top-1/3 flex -translate-x-1/2 items-center gap-2 border-[#C8754D] px-4 py-2 text-xs text-white`}>
+          <Icon name="pause" /> Paused · space to resume
         </p>
       )}
       <CursorHint store={store} />
@@ -89,29 +183,46 @@ function TopBar({ store }: { store: GameStore }) {
   const flare = sim.ev.flare && sim.time >= sim.ev.flare.start
   const reserve = P.cap + 1000
   const housing = sim.housing()
-  const need = (r: 'food' | 'water' | 'o2') => (sim.colonists * NEEDS[r] * (r === 'water' && sim.done.has('recycling') ? 0.4 : 1)) / 1
+  const need = (r: 'food' | 'water' | 'o2') => sim.colonists * NEEDS[r] * (r === 'water' && sim.done.has('recycling') ? 0.4 : 1)
+  const res = RESEARCH.find((r) => r.id === sim.current)
 
   return (
     <div className="pointer-events-auto flex flex-col gap-1.5 lg:flex-row lg:items-start lg:justify-between">
-      <div className="flex items-center gap-1.5">
-        <p className={`${panel} px-2.5 py-1.5 sm:text-xs`}>
-          <span className="text-mars">RENOVA</span> · Sol {String(sim.solNumber()).padStart(3, '0')} · {sim.clock()}{' '}
-          <span aria-label={sun > 0 ? 'Day' : 'Night'}>{sun > 0.05 ? '☀' : '☾'}</span>
-        </p>
-        {storm && <p className={`${panel} border-[#e0a072] px-2 py-1.5 text-[#e0a072]`}>Dust storm</p>}
-        {flare && <p className={`${panel} border-[#ff5a4f] px-2 py-1.5 text-[#ff7a6e]`}>Solar flare</p>}
+      {/* colony clock and events */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className={`${panel} flex items-center gap-2 px-2.5 py-1.5`}>
+          <Icon name={sun > 0.05 ? 'sun' : 'moon'} size={22} />
+          <span className="leading-tight">
+            <span className="block text-[#C8754D]">RENOVA · Colony 001</span>
+            <span className="block text-xs text-white">
+              Sol {String(sim.solNumber()).padStart(3, '0')} · {sim.clock()}
+            </span>
+          </span>
+        </div>
+        {storm && (
+          <p className={`${panel} flex items-center gap-1.5 border-[#C8754D] px-2 py-1.5 text-[#E5B07A]`}>
+            <Icon name="storm" /> Dust storm
+          </p>
+        )}
+        {flare && (
+          <p className={`${panel} flex animate-pulse items-center gap-1.5 border-[#B03E53] px-2 py-1.5 text-[#F3A6B6]`}>
+            <Icon name="warn" /> Solar flare
+          </p>
+        )}
       </div>
 
-      <dl className="grid grid-cols-4 gap-1 sm:grid-cols-8">
-        <Readout label="Crew" value={`${sim.colonists}/${housing}`} warn={sim.colonists >= housing} hint="Colonists / housing" />
-        <Readout label="Health" value={`${Math.round(sim.health)}%`} warn={sim.health < 50} bar={sim.health / 100} barColor={sim.health < 50 ? '#ff5a4f' : '#7ee07a'} />
-        <Readout
+      {/* colony readouts */}
+      <dl className={`${panel} grid grid-cols-4 divide-[#3F4246] sm:grid-cols-8 sm:divide-x`}>
+        <Stat icon="crew" label="Crew" value={`${sim.colonists}/${housing}`} tone={sim.colonists >= housing ? 'warn' : undefined} hint="Colonists / beds" />
+        <Stat icon="heart" label="Health" value={`${Math.round(sim.health)}%`} tone={sim.health < 50 ? 'bad' : undefined} bar={[sim.health / 100, sim.health < 50 ? '#D86B7B' : '#7BA750']} />
+        <Stat
+          icon="power"
           label="Power"
-          value={`${Math.round(P.gen)}/${Math.round(P.demand)}kW`}
-          warn={sim.shortages.has('power')}
-          bar={P.stored / reserve}
-          barColor="#ffd24a"
-          hint={`Generation / demand. Bar: ${fmt(P.stored)} of ${fmt(reserve)} kJ stored`}
+          value={`${Math.round(P.gen)}/${Math.round(P.demand)}`}
+          unit="kW"
+          tone={sim.shortages.has('power') ? 'bad' : undefined}
+          bar={[P.stored / reserve, '#65C9E8']}
+          hint={`Generation / demand. Batteries: ${fmt(P.stored)} of ${fmt(reserve)} kJ`}
         />
         <Stock store={store} id="water" need={need('water')} />
         <Stock store={store} id="food" need={need('food')} />
@@ -120,44 +231,74 @@ function TopBar({ store }: { store: GameStore }) {
         <Stock store={store} id="brick" />
       </dl>
 
+      {/* controls */}
       <div className="flex items-center gap-1">
-        <button type="button" className={btn} onClick={() => store.togglePause()} aria-pressed={ui.paused}>
-          {ui.paused ? '▶' : 'II'}
+        <button type="button" className={`${btn} ${ui.paused ? btnOn : ''}`} onClick={() => store.togglePause()} aria-label={ui.paused ? 'Resume' : 'Pause'} title="Pause · Space">
+          <Icon name={ui.paused ? 'play' : 'pause'} />
         </button>
-        {([1, 2, 3] as const).map((s) => (
-          <button key={s} type="button" className={`${btn} ${!ui.paused && ui.speed === s ? 'border-mars text-mars' : ''}`} onClick={() => store.setSpeed(s)}>
-            {s}×
-          </button>
-        ))}
-        <button type="button" className={btn} onClick={() => store.setPanel('research')}>
-          Research · T
+        <div className="flex">
+          {([1, 2, 3] as const).map((s) => (
+            <button key={s} type="button" className={`${btn} -ml-px px-2 ${!ui.paused && ui.speed === s ? btnOn : ''}`} onClick={() => store.setSpeed(s)} title={`Speed ${s}×`}>
+              {s}×
+            </button>
+          ))}
+        </div>
+        <button type="button" className={`${btn} min-w-[7rem]`} onClick={() => store.setPanel('research')} title="Research · T">
+          <Icon name="research" />
+          <span className="flex-1 text-left leading-tight">
+            <span className="block">Research</span>
+            {res ? <Bar value={sim.rp / res.cost} color="#65C9E8" className="mt-0.5" /> : <span className={`block text-[8px] ${TONE.good}`}>All done</span>}
+          </span>
         </button>
-        <button type="button" className={btn} onClick={() => store.setPanel('help')} title="How to play (H)">
-          ? Guide
+        <button type="button" className={btn} onClick={() => store.setPanel('help')} title="How to play · H" aria-label="How to play">
+          <Icon name="guide" />
         </button>
-        <button type="button" className={btn} onClick={() => store.setPanel('menu')}>
-          Menu
+        <button type="button" className={btn} onClick={() => store.setPanel('menu')} title="Menu · Esc" aria-label="Menu">
+          <Icon name="menu" />
         </button>
       </div>
     </div>
   )
 }
 
-function Readout({ label, value, warn, bar, barColor, hint }: { label: string; value: string; warn?: boolean; bar?: number; barColor?: string; hint?: string }) {
+function Stat({
+  icon,
+  label,
+  value,
+  unit,
+  tone,
+  bar,
+  sub,
+  hint,
+}: {
+  icon: IconName
+  label: string
+  value: string
+  unit?: string
+  tone?: keyof typeof TONE
+  bar?: [number, string]
+  sub?: ReactNode
+  hint?: string
+}) {
   return (
-    <div className={`${panel} min-w-[4.6rem] px-2 py-1`} title={hint}>
-      <dt className="text-[9px] text-star/50">{label}</dt>
-      <dd className={`text-xs sm:text-sm ${warn ? 'text-[#ff7a6e]' : 'text-star'}`}>{value}</dd>
-      {bar !== undefined && (
-        <span className="mt-0.5 block h-1 bg-star/10">
-          <span className="block h-full" style={{ width: `${Math.max(0, Math.min(1, bar)) * 100}%`, background: barColor }} />
-        </span>
-      )}
+    <div className="flex min-w-[4.9rem] items-center gap-1.5 px-2 py-1" title={hint ?? label}>
+      <Icon name={icon} size={18} />
+      <div className="min-w-0 flex-1 leading-tight">
+        <dt className="sr-only">{label}</dt>
+        <dd className={`text-xs sm:text-[13px] ${tone ? TONE[tone] : 'text-white'}`}>
+          {value}
+          {unit && <span className="ml-0.5 text-[8px] text-[#8A8A8A]">{unit}</span>}
+        </dd>
+        {bar ? <Bar value={bar[0]} color={bar[1]} className="mt-0.5" /> : <span className="block text-[8px]">{sub ?? <span className={TONE.label}>{label}</span>}</span>}
+      </div>
     </div>
   )
 }
 
-const STOCK_LABEL: Record<StockId, string> = { ...Object.fromEntries(Object.entries(ITEMS).map(([k, v]) => [k, v.name])), o2: 'Oxygen' } as Record<StockId, string>
+const STOCK: Record<StockId, { name: string; icon: IconName }> = {
+  ...(Object.fromEntries((Object.keys(ITEMS) as ItemId[]).map((k) => [k, { name: ITEMS[k].name, icon: k }])) as Record<ItemId, { name: string; icon: IconName }>),
+  o2: { name: 'Oxygen', icon: 'o2' },
+}
 
 function Stock({ store, id, need }: { store: GameStore; id: StockId; need?: number }) {
   const { sim } = store
@@ -165,14 +306,16 @@ function Stock({ store, id, need }: { store: GameStore; id: StockId; need?: numb
   const rate = sim.rates[id]
   const short = (id === 'food' || id === 'water' || id === 'o2') && sim.shortages.has(id)
   const sols = need && rate !== undefined && rate < 0 ? v / -rate : null
+  const low = short || (sols !== null && sols < 1)
   return (
-    <div className={`${panel} min-w-[4.6rem] px-2 py-1`} title={need ? `Crew needs ${need.toFixed(0)} per sol` : undefined}>
-      <dt className="text-[9px] text-star/50">{id === 'o2' ? 'O₂' : STOCK_LABEL[id]}</dt>
-      <dd className={`text-xs sm:text-sm ${short || (sols !== null && sols < 1) ? 'text-[#ff7a6e]' : 'text-star'}`}>{fmt(v)}</dd>
-      <span className={`block text-[8px] ${rate === undefined ? 'text-star/30' : rate < -0.5 ? 'text-[#ff9a8e]' : rate > 0.5 ? 'text-[#9ee69a]' : 'text-star/40'}`}>
-        {rate === undefined ? '…' : `${signed(rate)}/sol`}
-      </span>
-    </div>
+    <Stat
+      icon={STOCK[id].icon}
+      label={STOCK[id].name}
+      value={fmt(v)}
+      tone={low ? 'bad' : undefined}
+      hint={`${STOCK[id].name}${need ? ` · crew needs ${need.toFixed(0)} per sol` : ''}${sols !== null ? ` · runs out in ${sols.toFixed(1)} sols` : ''}`}
+      sub={rate === undefined ? <span className={TONE.label}>…</span> : <span className={rate < -0.5 ? TONE.bad : rate > 0.5 ? TONE.good : TONE.label}>{signed(rate)}/sol</span>}
+    />
   )
 }
 
@@ -183,107 +326,168 @@ function Missions({ store }: { store: GameStore }) {
   const [open, setOpen] = useState(true)
   const m = MISSIONS[sim.mission]
   const prog = m?.progress?.(sim)
+  const msgs = sim.messages.slice(-4).reverse()
+  const toneIcon = { info: 'tip', good: 'check', warn: 'warn', bad: 'warn' } as const
+  const toneText = { info: 'text-[#BFBFBF]', good: TONE.good, warn: TONE.warn, bad: TONE.bad }
   return (
-    <section className={`${panel} pointer-events-auto w-full max-w-[17rem] p-2.5 normal-case`} aria-label="Mission log">
-      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center justify-between uppercase text-mars">
-        <span>
+    <section className={`${panel} pointer-events-auto w-full max-w-[18rem] border-t-2 border-t-[#A95738]`} aria-label="Mission log">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 px-2.5 py-2 text-left">
+        <Icon name="flag" />
+        <span className="flex-1 text-[#C8754D]">
           Mission {Math.min(sim.mission + 1, MISSIONS.length)}/{MISSIONS.length}
         </span>
-        <span className="text-star/50">{open ? '−' : '+'}</span>
+        <span className={TONE.label}>{open ? '−' : '+'}</span>
       </button>
-      {open &&
-        (m ? (
-          <div className="mt-2 space-y-1.5">
-            <p className="text-xs uppercase text-star">{m.title}</p>
-            <p className="font-sans text-[12px] leading-snug text-star/85">{m.text}</p>
-            {prog && (
-              <span className="block h-1.5 bg-star/10">
-                <span className="block h-full bg-mars" style={{ width: `${(prog[0] / prog[1]) * 100}%` }} />
-              </span>
-            )}
-            <p className="font-sans text-[11px] leading-snug text-sand/80">💡 {m.tip}</p>
-          </div>
-        ) : (
-          <p className="mt-2 font-sans text-[12px] leading-snug text-star/85">All missions complete. The colony is yours — expand, optimise, survive the storms.</p>
-        ))}
-      <Log store={store} />
+      {open && (
+        <div className="space-y-2 border-t border-[#3F4246] px-2.5 pb-2.5 pt-2">
+          {m ? (
+            <>
+              <p className="text-xs text-white">{m.title}</p>
+              <p className="font-sans text-[12px] normal-case leading-snug text-[#D9D9D9]">{m.text}</p>
+              {prog && (
+                <div className="flex items-center gap-2">
+                  <Bar value={prog[0] / prog[1]} color="#C8754D" className="flex-1" />
+                  <span className={TONE.label}>
+                    {prog[0]}/{prog[1]}
+                  </span>
+                </div>
+              )}
+              <p className="flex gap-1.5 border border-[#3F4246] bg-[#151618]/60 p-1.5 font-sans text-[11px] normal-case leading-snug text-[#E5B07A]">
+                <Icon name="tip" size={14} className="mt-0.5" />
+                {m.tip}
+              </p>
+            </>
+          ) : (
+            <p className="flex gap-1.5 font-sans text-[12px] normal-case leading-snug text-[#D9D9D9]">
+              <Icon name="check" size={14} /> All missions complete. The colony is yours — expand, optimise, survive the storms.
+            </p>
+          )}
+          <ul aria-live="polite" className="space-y-1 border-t border-[#3F4246] pt-2 font-sans text-[11px] normal-case leading-snug">
+            {msgs.map((msg, k) => (
+              <li key={msg.id} className={`flex gap-1.5 ${toneText[msg.tone]} ${k ? 'opacity-70' : ''}`}>
+                <Icon name={toneIcon[msg.tone]} size={12} className="mt-0.5" />
+                {msg.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
-  )
-}
-
-function Log({ store }: { store: GameStore }) {
-  const msgs = store.sim.messages.slice(-4).reverse()
-  const tone = { info: 'text-star/70', good: 'text-[#9ee69a]', warn: 'text-[#ffd27a]', bad: 'text-[#ff7a6e]' }
-  return (
-    <ul aria-live="polite" className="mt-2.5 space-y-1 border-t-2 border-star/10 pt-2 font-sans text-[11px] leading-snug">
-      {msgs.map((m, k) => (
-        <li key={m.id} className={`${tone[m.tone]} ${k ? 'opacity-70' : ''}`}>
-          › {m.text}
-        </li>
-      ))}
-    </ul>
   )
 }
 
 /* ------------------------------- inspector ------------------------------- */
 
-function Inspector({ store, e }: { store: GameStore; e: Ent }) {
+function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: string }) {
   const { sim } = store
   const def = BUILDINGS[e.kind]
-  const [label, color] = STATUS[e.status]
-  const r = def.recipe
-  const items = (rec: Partial<Record<ItemId, number>>) =>
-    Object.entries(rec)
-      .map(([k, n]) => `${n} ${ITEMS[k as ItemId].name.toLowerCase()}`)
-      .join(' + ')
-  const buf = (b: Partial<Record<ItemId, number>>) =>
-    Object.entries(b)
-      .filter(([, n]) => (n ?? 0) > 0)
-      .map(([k, n]) => `${n} ${ITEMS[k as ItemId].name.toLowerCase()}`)
-      .join(', ') || '—'
+  const [label, dot] = STATUS[e.status]
+  const flat = e.kind === 'belt' || e.kind === 'junction'
   return (
-    <aside className={`${panel} pointer-events-auto w-full max-w-[17rem] p-2.5`} aria-label={`${def.name} details`}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-xs text-mars">{def.name}</p>
-        <button type="button" onClick={() => ((store.ui.selected = null), store.bump())} className="text-star/60 hover:text-mars" aria-label="Close">
+    <aside className={`${panel} pointer-events-auto w-full max-w-[18rem] border-t-2 border-t-[#3E8DA8]`} aria-label={`${def.name} details`}>
+      <div className="flex items-start gap-2 p-2.5">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={thumb} alt="" width={40} height={48} className="pixelated h-12 w-10 border border-[#3F4246] bg-[#151618]" />
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 text-xs text-white">
+            {def.name}
+            <span className="border border-[#3F4246] px-1 text-[8px] text-[#8A8A8A]">
+              {def.w}×{def.h}
+            </span>
+          </p>
+          {!flat && e.kind !== 'shield' && (
+            <p className="mt-1 flex items-center gap-1.5 text-[9px]">
+              <span className={`inline-block h-2 w-2 ${dot}`} />
+              {label}
+            </p>
+          )}
+        </div>
+        <button type="button" onClick={() => ((store.ui.selected = null), store.bump())} className={`${TONE.label} hover:text-white`} aria-label="Close">
           ✕
         </button>
       </div>
-      {e.kind !== 'belt' && e.kind !== 'shield' && <p className={`mt-1 ${color}`}>● {label}</p>}
-      <dl className="mt-2 space-y-1 font-sans text-[11px] normal-case leading-snug text-star/85">
-        {r && <Row k="Recipe" v={`${items(r.in)} → ${items(r.out)} · ${r.time}s`} />}
-        {def.mines && <Row k="Mines" v={e.mineItem ? ITEMS[e.mineItem].name : 'nothing here'} />}
-        {def.power > 0 && <Row k="Power" v={`${def.power} kW`} />}
-        {def.gen && <Row k="Output" v={e.kind === 'solar' ? `${sim.power.solar.toFixed(1)} kW now` : `${def.gen} kW`} />}
-        {e.kind === 'battery' && <Row k="Bank" v={`${fmt(sim.power.stored)} / ${fmt(sim.power.cap + 1000)} kJ (${BATTERY_KJ} each)`} />}
-        {r && <Row k="Input" v={buf(e.inBuf)} />}
-        {(r || def.mines) && <Row k="Output" v={buf(e.outBuf)} />}
-        {(e.kind === 'habitat' || e.kind === 'core') && <Row k="Residents" v={`${e.residents} / ${def.housing}`} />}
-        {e.kind === 'habitat' && <Row k="Shielded" v={e.shielded ? 'Yes' : 'No — build a shield within 2 tiles'} />}
-        {e.kind === 'belt' && <Row k="Carrying" v={e.items.map((x) => ITEMS[x.item].name.toLowerCase()).join(', ') || 'nothing'} />}
+      <dl className="space-y-1.5 border-t border-[#3F4246] px-2.5 py-2 font-sans text-[11px] normal-case">
+        {(def.recipe || def.mines) && <Row k="Makes" v={<Recipe def={def} />} />}
+        {def.mines && <Row k="Here" v={e.mineItem ? <Icon name={e.mineItem} size={14} /> : <span className={TONE.bad}>nothing to mine</span>} />}
+        {def.recipe && <Row k="Input" v={<Items list={e.inBuf} />} />}
+        {(def.recipe || def.mines) && <Row k="Output" v={<Items list={e.outBuf} />} />}
+        {def.power > 0 && (
+          <Row
+            k="Power"
+            v={
+              <span className="inline-flex items-center gap-1">
+                <Icon name="power" size={12} /> {def.power} kW
+              </span>
+            }
+          />
+        )}
+        {def.gen && (
+          <Row
+            k="Makes"
+            v={
+              <span className={`inline-flex items-center gap-1 ${TONE.cyan}`}>
+                <Icon name="power" size={12} /> {e.kind === 'solar' ? `${sim.power.solar.toFixed(1)} kW now` : `${def.gen} kW`}
+              </span>
+            }
+          />
+        )}
+        {e.kind === 'battery' && (
+          <Row
+            k="Bank"
+            v={
+              <span className="inline-flex items-center gap-1">
+                <Icon name="battery" size={12} /> {fmt(sim.power.stored)} / {fmt(sim.power.cap + 1000)} kJ
+                <span className={TONE.label}>({BATTERY_KJ} each)</span>
+              </span>
+            }
+          />
+        )}
+        {(e.kind === 'habitat' || e.kind === 'core') && (
+          <Row
+            k="Crew"
+            v={
+              <span className="inline-flex items-center gap-1">
+                <Icon name="crew" size={12} /> {e.residents} / {def.housing}
+              </span>
+            }
+          />
+        )}
+        {e.kind === 'habitat' && <Row k="Shielded" v={e.shielded ? <span className={TONE.good}>Yes</span> : <span className={TONE.warn}>No — shield within 2 tiles</span>} />}
+        {e.kind === 'belt' && (
+          <Row
+            k="Carrying"
+            v={e.items.length ? <Items list={e.items.reduce((m, x) => ({ ...m, [x.item]: (m[x.item] ?? 0) + 1 }), {} as Partial<Record<ItemId, number>>)} /> : <span className={TONE.label}>nothing</span>}
+          />
+        )}
       </dl>
-      {(r || def.mines) && (
-        <span className="mt-2 block h-1.5 bg-star/10">
-          <span className="block h-full bg-mars" style={{ width: `${Math.min(1, e.progress) * 100}%` }} />
-        </span>
+      {(def.recipe || def.mines) && (
+        <div className="px-2.5 pb-2">
+          <Bar value={e.progress} color="#C8754D" />
+        </div>
       )}
       {e.kind === 'core' && (
-        <dl className="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 font-sans text-[11px] normal-case text-star/80">
+        <dl className="grid grid-cols-4 gap-1 border-t border-[#3F4246] px-2.5 py-2">
           {(Object.keys(ITEMS) as ItemId[]).map((k) => (
-            <Row key={k} k={ITEMS[k].name} v={fmt(sim.stock[k])} />
+            <div key={k} className="flex items-center gap-1" title={ITEMS[k].name}>
+              <Icon name={k} size={14} />
+              <span className="text-white">{fmt(sim.stock[k])}</span>
+            </div>
           ))}
         </dl>
       )}
-      <p className="mt-2 font-sans text-[11px] normal-case leading-snug text-sand/80">{def.fact}</p>
-      <div className="mt-2.5 flex gap-1">
+      <p className="mx-2.5 mb-2 flex gap-1.5 border border-[#3F4246] bg-[#151618]/60 p-1.5 font-sans text-[11px] normal-case leading-snug text-[#E5B07A]">
+        <Icon name="tip" size={14} className="mt-0.5" />
+        {def.fact}
+      </p>
+      <div className="flex gap-1 px-2.5 pb-2.5">
         {def.outputs && (
           <button type="button" className={btn} onClick={() => (store.sim.rotate(e), store.bump())}>
-            Rotate · R
+            <Icon name="rotate" size={14} /> Rotate · R
           </button>
         )}
         {e.kind !== 'core' && (
           <button type="button" className={btn} onClick={() => store.removeAt(e.i, e.j)}>
-            Remove
+            <Icon name="remove" size={14} /> Remove
           </button>
         )}
       </div>
@@ -292,39 +496,71 @@ function Inspector({ store, e }: { store: GameStore; e: Ent }) {
 }
 
 const Row = ({ k, v }: { k: string; v: ReactNode }) => (
-  <div className="flex justify-between gap-3">
-    <dt className="text-star/50">{k}</dt>
-    <dd className="text-right">{v}</dd>
+  <div className="flex items-center justify-between gap-3">
+    <dt className="text-[#8A8A8A]">{k}</dt>
+    <dd className="text-right text-[#F6F6F6]">{v}</dd>
   </div>
 )
 
 /* ------------------------------- build bar ------------------------------- */
 
+function BuildCard({ store, def }: { store: GameStore; def: BuildingDef }) {
+  const { sim, ui } = store
+  const dirs = ['↘', '↙', '↖', '↗']
+  const locked = !sim.unlocked(def.kind)
+  return (
+    <div className={`${panel} max-w-md border-t-2 border-t-[#C8754D] p-2.5`}>
+      <p className="flex flex-wrap items-center gap-2 text-xs text-white">
+        {def.name}
+        <span className="border border-[#3F4246] px-1 text-[8px] text-[#8A8A8A]">
+          {def.w}×{def.h}
+        </span>
+        <span className="ml-auto inline-flex items-center gap-2 text-[10px]">
+          <Cost def={def} poor={!sim.affordable(def.kind)} />
+          {def.power > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-[#BFBFBF]">
+              <Icon name="power" size={12} />
+              {def.power}kW
+            </span>
+          )}
+          {def.gen && (
+            <span className={`inline-flex items-center gap-0.5 ${TONE.cyan}`}>
+              <Icon name="power" size={12} />+{def.gen}kW
+            </span>
+          )}
+        </span>
+      </p>
+      <p className="mt-1 font-sans text-[12px] normal-case leading-snug text-[#D9D9D9]">{def.desc}</p>
+      {(def.recipe || def.mines) && (
+        <p className="mt-1.5 font-sans text-[11px] normal-case">
+          <Recipe def={def} />
+        </p>
+      )}
+      {locked && (
+        <p className={`mt-1.5 flex items-center gap-1.5 ${TONE.warn}`}>
+          <Icon name="lock" size={12} /> Research {RESEARCH.find((r) => r.id === def.research)?.name}
+        </p>
+      )}
+      {ui.tool === def.kind && (
+        <p className={`mt-1.5 ${TONE.label}`}>
+          Facing {dirs[ui.dir]} · R rotate · drag to build · right-click remove
+        </p>
+      )}
+    </div>
+  )
+}
+
 function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<Kind, string> }) {
   const { sim, ui } = store
   const [peek, setPeek] = useState<Kind | null>(null)
   const show = peek ?? ui.tool
-  const def = show ? BUILDINGS[show] : null
-  const dirs = ['↘', '↙', '↖', '↗']
   return (
     <div className="pointer-events-auto flex flex-col gap-1.5">
       <div className="flex flex-wrap items-end justify-between gap-1.5">
-        {def ? (
-          <div className={`${panel} max-w-md p-2`}>
-            <p className="text-xs text-mars">
-              {def.name} <span className="text-star/60">· {store.costLabel(def.kind)}</span>
-              {def.power > 0 && <span className="text-star/60"> · {def.power} kW</span>}
-            </p>
-            <p className="mt-1 font-sans text-[12px] normal-case leading-snug text-star/85">{def.desc}</p>
-            {!sim.unlocked(def.kind) && <p className="mt-1 text-[#ffd27a]">Locked · research {RESEARCH.find((r) => r.id === def.research)?.name}</p>}
-            {ui.tool && !peek && (
-              <p className="mt-1 text-star/60">
-                Facing {dirs[ui.dir]} · R rotate · drag to build · right-click remove{ui.hoverErr ? <span className="text-[#ff7a6e]"> · {ui.hoverErr}</span> : null}
-              </p>
-            )}
-          </div>
+        {show ? (
+          <BuildCard store={store} def={BUILDINGS[show]} />
         ) : (
-          <p className={`${panel} hidden px-2 py-1.5 text-star/60 sm:block`}>Click a building to inspect · drag to pan · wheel to zoom · H for help</p>
+          <p className={`${panel} hidden px-2.5 py-1.5 text-[#8A8A8A] sm:block`}>Click a building to inspect · drag to pan · wheel to zoom · H for help</p>
         )}
         <div className="flex gap-1">
           <button type="button" className={btn} onClick={() => (store.zoomRequest = -1)} aria-label="Zoom out">
@@ -334,41 +570,56 @@ function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<Kind, s
             +
           </button>
           <button type="button" className={btn} onClick={() => (store.centerRequest = true)}>
-            Core · C
+            <Icon name="crew" size={14} /> Core · C
           </button>
         </div>
       </div>
-      <div className="flex items-stretch gap-1 overflow-x-auto pb-0.5" role="toolbar" aria-label="Build">
-        {BUILD_ORDER.map((k) => {
-          const d = BUILDINGS[k]
-          const locked = !sim.unlocked(k)
-          const poor = !sim.affordable(k)
-          const sel = ui.tool === k
+      <div className={`${panel} flex items-stretch gap-0 overflow-x-auto border-t-2 border-t-[#A95738]`} role="toolbar" aria-label="Build">
+        {CATEGORY.map((cat) => {
+          const kinds = BUILD_ORDER.filter((k) => BUILDINGS[k].group === cat.id)
+          if (!kinds.length) return null
           return (
-            <button
-              key={k}
-              type="button"
-              aria-pressed={sel}
-              disabled={locked}
-              onClick={() => store.setTool(k)}
-              onMouseEnter={() => setPeek(k)}
-              onMouseLeave={() => setPeek(null)}
-              onFocus={() => setPeek(k)}
-              onBlur={() => setPeek(null)}
-              className={`relative flex w-[4.4rem] shrink-0 flex-col items-center border-2 px-1 pb-1 pt-0.5 transition-colors ${
-                sel ? 'border-mars bg-mars/20' : 'border-star/15 bg-[#0c1220]/88 hover:border-star/60'
-              } ${locked ? 'opacity-35' : ''}`}
-            >
-              {HOTKEYS[k] && <span className="absolute left-1 top-0.5 text-[8px] text-star/45">{HOTKEYS[k]}</span>}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={thumbs[k]} alt="" width={40} height={48} className="pixelated h-12 w-10" />
-              <span className="text-[9px] leading-tight">{locked ? '🔒 Locked' : d.short}</span>
-              {!locked && (
-                <span className={`mt-0.5 text-[8px] leading-none ${poor ? 'text-[#ff9a8e]' : 'text-star/45'}`}>
-                  {[d.cost.metal ? `${d.cost.metal}M` : '', d.cost.brick ? `${d.cost.brick}B` : ''].filter(Boolean).join(' ') || 'free'}
-                </span>
-              )}
-            </button>
+            <div key={cat.id} className="flex flex-col border-r border-[#3F4246] last:border-r-0">
+              <p className="flex items-center gap-1 px-1.5 pt-1 text-[8px] text-[#8A8A8A]">
+                <Icon name={cat.icon} size={10} /> {cat.name}
+              </p>
+              <div className="flex gap-1 p-1">
+                {kinds.map((k) => {
+                  const d = BUILDINGS[k]
+                  const locked = !sim.unlocked(k)
+                  const poor = !sim.affordable(k)
+                  const sel = ui.tool === k
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      aria-pressed={sel}
+                      aria-label={d.name}
+                      disabled={locked}
+                      onClick={() => store.setTool(k)}
+                      onMouseEnter={() => setPeek(k)}
+                      onMouseLeave={() => setPeek(null)}
+                      onFocus={() => setPeek(k)}
+                      onBlur={() => setPeek(null)}
+                      className={`relative flex w-[4.4rem] shrink-0 flex-col items-center border px-1 pb-1 pt-0.5 transition-colors ${
+                        sel ? 'border-[#C8754D] bg-[#A95738]/30 shadow-[inset_0_0_0_1px_#D58B59]' : 'border-[#3F4246] bg-[#2E3033] hover:border-[#8A8A8A]'
+                      } ${locked ? 'opacity-40' : ''}`}
+                    >
+                      {HOTKEYS[k] && <span className="absolute left-1 top-0.5 text-[8px] text-[#8A8A8A]">{HOTKEYS[k]}</span>}
+                      {(d.w > 1 || d.h > 1) && (
+                        <span className="absolute right-0.5 top-0.5 bg-[#151618] px-0.5 text-[7px] text-[#65C9E8]">
+                          {d.w}×{d.h}
+                        </span>
+                      )}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={thumbs[k]} alt="" width={40} height={48} className="pixelated h-12 w-10" />
+                      <span className="text-[9px] leading-tight text-white">{d.short}</span>
+                      <span className="mt-0.5 text-[8px] leading-none">{locked ? <Icon name="lock" size={10} /> : <Cost def={d} poor={poor} />}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           )
         })}
       </div>
@@ -376,10 +627,7 @@ function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<Kind, s
   )
 }
 
-/**
- * Next to the cursor: why a build won't work, or — with no tool selected —
- * the name and state of the building under the cursor.
- */
+/** Next to the cursor: why a build won't work, or the building under it. */
 function CursorHint({ store }: { store: GameStore }) {
   const { ui } = store
   if (!ui.pointer || ui.panel) return null
@@ -387,31 +635,36 @@ function CursorHint({ store }: { store: GameStore }) {
   if (ui.tool) {
     if (!ui.hoverErr) return null
     return (
-      <p aria-hidden className="pointer-events-none absolute z-10 whitespace-nowrap border-2 border-[#ff5a4f]/70 bg-[#0c1220]/92 px-2 py-1 text-[9px] text-[#ff9a8e]" style={at}>
-        {ui.hoverErr}
+      <p aria-hidden className={`${panel} pointer-events-none absolute z-10 flex items-center gap-1 whitespace-nowrap border-[#B03E53] px-2 py-1 text-[9px] text-[#F3A6B6]`} style={at}>
+        <Icon name="warn" size={12} /> {ui.hoverErr}
       </p>
     )
   }
   const e = store.hovered()
   if (!e) return null
   const def = BUILDINGS[e.kind]
-  const [label, color] = STATUS[e.status]
-  const showStatus = e.kind !== 'belt' && e.kind !== 'shield'
+  const [label, dot] = STATUS[e.status]
+  const flat = e.kind === 'belt' || e.kind === 'junction'
   return (
-    <p aria-hidden className="pointer-events-none absolute z-10 whitespace-nowrap border-2 border-[#ffe7b8]/50 bg-[#0c1220]/92 px-2 py-1 text-[9px]" style={at}>
-      <span className="text-star">{def.name}</span>
-      <span className="text-star/45">
+    <p aria-hidden className={`${panel} pointer-events-none absolute z-10 whitespace-nowrap px-2 py-1 text-[9px]`} style={at}>
+      <span className="text-white">{def.name}</span>
+      <span className="text-[#8A8A8A]">
         {' '}
         · {def.w}×{def.h}
       </span>
-      {showStatus && <span className={`block ${color}`}>● {label}</span>}
+      {!flat && e.kind !== 'shield' && (
+        <span className="mt-0.5 flex items-center gap-1">
+          <span className={`inline-block h-1.5 w-1.5 ${dot}`} />
+          {label}
+        </span>
+      )}
     </p>
   )
 }
 
 /* -------------------------------- panels --------------------------------- */
 
-function Modal({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose?: () => void; wide?: boolean }) {
+function Modal({ title, icon, children, onClose, wide }: { title: string; icon?: IconName; children: ReactNode; onClose?: () => void; wide?: boolean }) {
   return (
     <div className="pointer-events-auto absolute inset-0 z-20 flex items-center justify-center bg-[#0c1220]/70 p-4" onClick={onClose}>
       <div
@@ -419,17 +672,18 @@ function Modal({ title, children, onClose, wide }: { title: string; children: Re
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
-        className={`rise max-h-full w-full overflow-y-auto border-2 border-mars bg-[#0c1220] p-5 ${wide ? 'max-w-2xl' : 'max-w-md'}`}
+        className={`${panel} rise max-h-full w-full overflow-y-auto border-t-2 border-t-[#C8754D] ${wide ? 'max-w-2xl' : 'max-w-md'}`}
       >
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-sm text-mars sm:text-base">{title}</p>
+        <div className="flex items-center gap-2 border-b border-[#3F4246] bg-[#2E3033] px-4 py-2.5">
+          {icon && <Icon name={icon} />}
+          <p className="flex-1 text-sm text-white">{title}</p>
           {onClose && (
-            <button type="button" onClick={onClose} className="text-star/60 hover:text-mars" aria-label="Close">
+            <button type="button" onClick={onClose} className="text-[#8A8A8A] hover:text-white" aria-label="Close">
               ✕
             </button>
           )}
         </div>
-        {children}
+        <div className="p-4">{children}</div>
       </div>
     </div>
   )
@@ -440,8 +694,8 @@ function Research({ store }: { store: GameStore }) {
   const labs = sim.count('lab')
   const rate = (labs * 0.4 + 0.12) * SOL
   return (
-    <Modal title="Research" onClose={() => store.setPanel(null)} wide>
-      <p className="mt-1 font-sans text-[12px] normal-case text-star/70">
+    <Modal title="Research" icon="research" onClose={() => store.setPanel(null)} wide>
+      <p className="font-sans text-[12px] normal-case text-[#BFBFBF]">
         {fmt(sim.rp)} RP banked · about {rate.toFixed(0)} RP per sol ({labs} lab{labs === 1 ? '' : 's'} + the core). Build more labs to research faster.
       </p>
       <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
@@ -455,22 +709,19 @@ function Research({ store }: { store: GameStore }) {
                 type="button"
                 disabled={done || locked}
                 onClick={() => (sim.setResearch(r.id), store.bump())}
-                className={`w-full border-2 p-2.5 text-left transition-colors ${
-                  cur ? 'border-mars bg-mars/15' : done ? 'border-[#7ee07a]/40' : 'border-star/20 hover:border-star/60'
+                className={`w-full border p-2.5 text-left transition-colors ${
+                  cur ? 'border-[#C8754D] bg-[#A95738]/25' : done ? 'border-[#668B45] bg-[#4F6F3E]/15' : 'border-[#3F4246] bg-[#2E3033] hover:border-[#8A8A8A]'
                 } ${locked ? 'opacity-40' : ''}`}
               >
-                <span className="flex justify-between gap-2 text-[11px]">
-                  <span className={done ? 'text-[#9ee69a]' : 'text-star'}>{r.name}</span>
-                  <span className="text-star/50">{done ? '✓' : `${r.cost} RP`}</span>
+                <span className="flex items-center gap-1.5 text-[11px]">
+                  <Icon name={done ? 'check' : locked ? 'lock' : 'research'} size={14} />
+                  <span className={`flex-1 ${done ? TONE.good : 'text-white'}`}>{r.name}</span>
+                  <span className={TONE.label}>{done ? 'Done' : `${r.cost} RP`}</span>
                 </span>
-                <span className="mt-1 block text-[9px] text-sand/70">{r.field}</span>
-                <span className="mt-1 block font-sans text-[11px] normal-case text-star/75">{r.effect}</span>
-                {locked && <span className="mt-1 block text-[9px] text-star/50">Needs {RESEARCH.find((x) => x.id === r.needs)?.name}</span>}
-                {cur && (
-                  <span className="mt-1.5 block h-1 bg-star/10">
-                    <span className="block h-full bg-mars" style={{ width: `${Math.min(1, sim.rp / r.cost) * 100}%` }} />
-                  </span>
-                )}
+                <span className="mt-1 block text-[9px] text-[#E5B07A]">{r.field}</span>
+                <span className="mt-1 block font-sans text-[11px] normal-case text-[#D9D9D9]">{r.effect}</span>
+                {locked && <span className="mt-1 block text-[9px] text-[#8A8A8A]">Needs {RESEARCH.find((x) => x.id === r.needs)?.name}</span>}
+                {cur && <Bar value={sim.rp / r.cost} color="#65C9E8" className="mt-1.5" />}
               </button>
             </li>
           )
@@ -483,32 +734,33 @@ function Research({ store }: { store: GameStore }) {
 function Menu({ store }: { store: GameStore }) {
   const [confirm, setConfirm] = useState(false)
   const [saved, setSaved] = useState(false)
+  const row = `${btn} justify-start py-2 text-xs`
   return (
-    <Modal title="Paused" onClose={() => store.setPanel(null)}>
-      <nav className="mt-4 flex flex-col gap-2 text-xs">
-        <button type="button" className={btn} onClick={() => store.setPanel(null)}>
-          Resume
+    <Modal title="Paused" icon="menu" onClose={() => store.setPanel(null)}>
+      <nav className="flex flex-col gap-1.5">
+        <button type="button" className={row} onClick={() => store.setPanel(null)}>
+          <Icon name="play" /> Resume
         </button>
-        <button type="button" className={btn} onClick={() => (store.save(), setSaved(true))}>
-          {saved ? 'Saved ✓' : 'Save game'}
+        <button type="button" className={row} onClick={() => (store.save(), setSaved(true))}>
+          <Icon name={saved ? 'check' : 'battery'} /> {saved ? 'Saved' : 'Save game'}
         </button>
-        <button type="button" className={btn} onClick={() => store.setPanel('help')}>
-          How to play
+        <button type="button" className={row} onClick={() => store.setPanel('help')}>
+          <Icon name="guide" /> How to play
         </button>
         {confirm ? (
-          <button type="button" className={`${btn} border-[#ff5a4f] text-[#ff7a6e]`} onClick={() => store.newGame()}>
-            Really start over? Click to confirm
+          <button type="button" className={`${row} border-[#B03E53] text-[#F3A6B6]`} onClick={() => store.newGame()}>
+            <Icon name="warn" /> Really start over? Click to confirm
           </button>
         ) : (
-          <button type="button" className={btn} onClick={() => setConfirm(true)}>
-            New map
+          <button type="button" className={row} onClick={() => setConfirm(true)}>
+            <Icon name="flag" /> New map
           </button>
         )}
-        <Link href="/" className={`${btn} text-center`} onClick={() => store.save()}>
-          Exit to website
+        <Link href="/" className={row} onClick={() => store.save()}>
+          <Icon name="remove" /> Exit to website
         </Link>
       </nav>
-      <p className="mt-4 font-sans text-[11px] normal-case text-star/50">The game saves itself every few seconds in this browser.</p>
+      <p className="mt-3 font-sans text-[11px] normal-case text-[#8A8A8A]">The game saves itself every few seconds in this browser.</p>
     </Modal>
   )
 }
@@ -516,22 +768,24 @@ function Menu({ store }: { store: GameStore }) {
 function PopupCard({ store }: { store: GameStore }) {
   const p = store.sim.popups[0]
   const kicker = { research: `Science unlocked · ${p.field}`, win: 'Mission accomplished', lose: 'Colony report', intro: 'Mission 001 · Sol 1' }[p.kind]
+  const icon: IconName = { research: 'research', win: 'check', lose: 'warn', intro: 'flag' }[p.kind] as IconName
+  const primary = `${btn} justify-center border-[#C8754D] bg-[#A95738] text-white hover:bg-[#C8754D]`
   return (
-    <Modal title={p.title}>
-      <p className="mt-1 text-[10px] text-sand/70">{kicker}</p>
-      <p className="mt-3 font-sans text-[13px] normal-case leading-relaxed text-star/90">{p.body}</p>
+    <Modal title={p.title} icon={icon}>
+      <p className="text-[10px] text-[#E5B07A]">{kicker}</p>
+      <p className="mt-2 font-sans text-[13px] normal-case leading-relaxed text-[#F6F6F6]">{p.body}</p>
       <div className="mt-5 grid gap-2 text-xs sm:grid-cols-2">
         {p.kind === 'lose' ? (
           <>
-            <button type="button" className={`${btn} border-mars bg-mars text-navy hover:bg-star hover:text-navy`} onClick={() => store.newGame()} autoFocus>
+            <button type="button" className={primary} onClick={() => store.newGame()} autoFocus>
               Try again
             </button>
-            <Link href="/" className={`${btn} text-center`}>
+            <Link href="/" className={`${btn} justify-center`}>
               Exit to website
             </Link>
           </>
         ) : (
-          <button type="button" className={`${btn} border-mars bg-mars text-navy hover:bg-star hover:text-navy sm:col-span-2`} onClick={() => store.closePopup()} autoFocus>
+          <button type="button" className={`${primary} sm:col-span-2`} onClick={() => store.closePopup()} autoFocus>
             {p.kind === 'intro' ? 'Begin mission' : p.kind === 'win' ? 'Keep building' : 'Continue'}
           </button>
         )}
