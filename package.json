@@ -1,0 +1,27 @@
+{
+  "name": "renova",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test:sim": "tsx scripts/sim-test.ts && tsx scripts/sim-chains.ts && tsx scripts/belt-test.ts && tsx scripts/road-test.ts && tsx scripts/footprint-test.ts && tsx scripts/junction-test.ts"
+  },
+  "dependencies": {
+    "next": "^16.4.6",
+    "phaser": "3.90.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.13",
+    "@types/node": "22.18.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "4.1.13",
+    "tsx": "^4.20.5",
+    "typescript": "5.9.2"
+  }
+}
