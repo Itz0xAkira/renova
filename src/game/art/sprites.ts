@@ -27,19 +27,24 @@ export const roverKey = (dir: Dir, frame: number, loaded: boolean) => `rover_${d
 export { groundURL, skyCanvas, terrainCanvas, TER_H, TER_OX, TER_OY, TER_W } from '@/game/art/terrain'
 
 /**
- * Building canvases are SPR_W × SPR_H with the tile centre at (SPR_AX, SPR_AY).
- * They're wider on the right to leave room for the cast shadow.
+ * Building canvases are sized from the footprint: a w×h building spans
+ * ±(w+h)·8 px across, with room on the right for shading and above for
+ * towers, masts and the lander. (ax, ay) is the footprint centre.
  */
-export const SPR_W = 96
-export const SPR_H = 100
-export const SPR_AX = 36
-export const SPR_AY = 68
-export const CORE_W = 160
-export const CORE_H = 130
-export const CORE_AX = 60
-export const CORE_AY = 84
+export type SpriteSpec = { W: number; H: number; ax: number; ay: number }
+const specs = new Map<Kind, SpriteSpec>()
+export function spriteSpec(kind: Kind): SpriteSpec {
+  let s = specs.get(kind)
+  if (!s) {
+    const span = BUILDINGS[kind].w + BUILDINGS[kind].h
+    const hw = span * 8
+    const tall = 72 + span * 12
+    s = { W: hw * 2 + 36, H: tall + span * 4 + 10, ax: hw + 14, ay: tall }
+    specs.set(kind, s)
+  }
+  return s
+}
 
-/** Multi-tile buildings use the big canvas, anchored at the centre of their footprint. */
 export const isBig = (k: Kind) => BUILDINGS[k].w > 1 || BUILDINGS[k].h > 1
 
 export function drawKind(ctx: Ctx, kind: Kind, x: number, y: number, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
@@ -60,7 +65,7 @@ function drawKindInner(ctx: Ctx, kind: Kind, x: number, y: number, t: number, op
     case 'drill':
       return iceDrill(ctx, x, y, t)
     case 'excavator':
-      return excavator(ctx, x - 3, y, t)
+      return excavator(ctx, x, y, t)
     case 'melter':
       return melter(ctx, x, y, t, opt.level ?? 0.5)
     case 'smelter':
@@ -135,12 +140,11 @@ function iconCanvas(name: string) {
 
 /* -------------------------------- baking -------------------------------- */
 
-const SPEC = (big: boolean) => ({ W: big ? CORE_W : SPR_W, H: big ? CORE_H : SPR_H, ax: big ? CORE_AX : SPR_AX, ay: big ? CORE_AY : SPR_AY })
 
 /** The bare structure: lit, no slab, no outline. */
 function structure(kind: Kind, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
   const big = isBig(kind)
-  const { W, H, ax, ay } = SPEC(big)
+  const { W, H, ax, ay } = spriteSpec(kind)
   const layer = canvas(W, H, (ctx) => drawKind(ctx, kind, ax, ay, t, opt))
   shadeLayer(layer, ax, ay, big ? 30 : 14)
   if (process.env.NODE_ENV !== 'production') {
@@ -162,7 +166,7 @@ function structure(kind: Kind, t: number, opt: { dim?: boolean; level?: number; 
 
 /** A finished building sprite: dark outline plus the lit structure. Slab and shadow live on the ground layer. */
 function buildingCanvas(kind: Kind, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
-  const { W, H } = SPEC(isBig(kind))
+  const { W, H } = spriteSpec(kind)
   const layer = structure(kind, t, opt)
   return canvas(W, H, (ctx) => {
     ctx.drawImage(outlineOf(layer), 0, 0)
@@ -283,6 +287,11 @@ export function bakeAll(add: TextureSink) {
   }))
 }
 
+/** A building as the game shows it, for the dev art preview. */
+export function previewCanvas(kind: Kind, tier: number, t: number) {
+  return buildingCanvas(kind, t, { tier, level: 0.7 })
+}
+
 /** A thumbnail for the build bar (tile + structure), as a data URL. */
 export function thumbURL(kind: Kind) {
   return canvas(40, 48, (ctx) => {
@@ -296,19 +305,13 @@ export function thumbURL(kind: Kind) {
       ctx.drawImage(junctionCanvas(0), 3, 25)
       return
     }
-    if (!isBig(kind)) {
-      ctx.drawImage(buildingCanvas(kind, 0.3, { level: 0.7 }), 20 - SPR_AX, 38 - SPR_AY)
-      return
-    }
-    // multi-tile: draw the whole footprint, then shrink it to fit the button
-    const { w, h } = BUILDINGS[kind]
-    void w
-    void h
-    const full = canvas(CORE_W, CORE_H, (c) => c.drawImage(buildingCanvas(kind, 0.3), 0, 0))
-    const k = 0.5
-    ctx.imageSmoothingEnabled = true
+    // the whole footprint, shrunk to fit the button
+    const { W, H, ax, ay } = spriteSpec(kind)
+    const span = BUILDINGS[kind].w + BUILDINGS[kind].h
+    const k = Math.min(1, 34 / (span * 16))
+    ctx.imageSmoothingEnabled = k < 1
     ctx.clearRect(0, 0, 40, 48)
-    ctx.drawImage(full, 20 - CORE_AX * k, 40 - CORE_AY * k, CORE_W * k, CORE_H * k)
+    ctx.drawImage(buildingCanvas(kind, 0.3, { level: 0.7 }), 20 - ax * k, 40 - ay * k, W * k, H * k)
   }).toDataURL()
 }
 

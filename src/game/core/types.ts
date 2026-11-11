@@ -61,8 +61,21 @@ export type Shortage = 'food' | 'water' | 'o2' | 'power' | 'radiation' | 'housin
 
 /* --------------------------------- saves --------------------------------- */
 
-/** Current save format. Older versions are migrated by `Sim.load`. */
-export const SAVE_VERSION = 2
+/**
+ * Current save format. v3 came with the bigger buildings and the 96-tile map; older
+ * layouts can't be carried over, so `Sim.load` refuses them with `OutdatedSaveError`.
+ */
+export const SAVE_VERSION = 3
+
+/** Thrown by `Sim.load` for a save from before the current layout (v1, v2): start a fresh colony. */
+export class OutdatedSaveError extends Error {
+  readonly version: number
+  constructor(version: number) {
+    super(`save version ${version} is from an older colony layout (current: ${SAVE_VERSION})`)
+    this.name = 'OutdatedSaveError'
+    this.version = version
+  }
+}
 
 /** One saved building. Short keys keep the save small; everything but kind, position and dir is optional. */
 export type SaveEnt = {
@@ -124,24 +137,4 @@ export type SaveData = {
   rng: number
   /** Ground wear from rovers and crew, as sparse [tile index, wear] pairs. */
   wear: [number, number][]
-}
-
-/** The first save format: buildings as tuples, the mission as a list index, one shared power pool. */
-export type SaveDataV1 = {
-  v: 1
-  seed: number
-  time: number
-  stock: Record<StockId, number>
-  colonists: number
-  health: number
-  stored: number
-  rp: number
-  done: ResearchId[]
-  current: ResearchId | null
-  mission: number
-  delivered: Record<ItemId, number>
-  ents: [Kind, number, number, Dir, number?][]
-  ev: SaveData['ev']
-  won: boolean
-  wear?: [number, number][]
 }

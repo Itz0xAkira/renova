@@ -31,18 +31,18 @@ export const reload = (s: Sim) => Sim.load(JSON.parse(JSON.stringify(s.save())))
 
 /**
  * A sim on its real (seeded) ground, with plenty of materials, plus the top-left of an
- * open w×h patch of plain sand inside the core's power square — for tests that save and
- * reload (loading regenerates the ground from the seed).
+ * open w×h patch near the core — plain sand, or (`anyGround`) anything but boulders and
+ * craters — for tests that save and reload (loading regenerates the ground from the seed).
  */
-export function natural(seed = 42, w = 9, h = 9) {
+export function natural(seed = 42, w = 9, h = 9, anyGround = false) {
   const s = new Sim(seed)
   s.stock.metal = 99999
   s.stock.brick = 99999
-  for (let r = 0; r < 12; r++)
+  for (let r = 0; r < 24; r++)
     for (let j = c - r; j <= c + r; j++)
       for (let i = c - r; i <= c + r; i++) {
         let ok = true
-        for (let dj = 0; dj < h && ok; dj++) for (let di = 0; di < w && ok; di++) ok = s.groundAt(i + di, j + dj) === 'sand' && !s.entAt(i + di, j + dj)
+        for (let dj = 0; dj < h && ok; dj++) for (let di = 0; di < w && ok; di++) ok = (anyGround ? !['rock', 'crater', null].includes(s.groundAt(i + di, j + dj)) : s.groundAt(i + di, j + dj) === 'sand') && !s.entAt(i + di, j + dj)
         if (ok) return { s, at: [i, j] as [number, number] }
       }
   throw new Error('no open patch')

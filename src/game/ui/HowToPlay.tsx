@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { groundURL, itemURL, thumbURL } from '@/game/art/sprites'
-import { BUILDINGS, ITEMS, NEEDS, type ItemId, type Kind } from '@/game/core/data'
+import { BUILDINGS, ITEMS, NEEDS, SHIELD_REACH, type ItemId, type Kind } from '@/game/core/data'
 import { MISSIONS } from '@/game/core/missions'
 
 /**
@@ -95,7 +95,7 @@ function pages(art: Art): { title: string; kicker: string; body: ReactNode }[] {
         <>
           <Chain art={art} steps={[{ kind: 'drill' }, { kind: 'belt' }, { kind: 'belt' }, { kind: 'melter' }, { kind: 'belt' }, { kind: 'core' }]} />
           <P>
-            Buildings take <B>1, 4 or 6 tiles</B> — the outline under your cursor shows the footprint. Every miner and machine has an <B>orange arrow</B>: it pushes what it makes onto the tile the arrow points at. Press <B>R</B> to rotate before you build.
+            Buildings are big: from <B>2×2</B> up to <B>4×3 tiles</B> (belts, junctions and pylons take one) — the outline under your cursor shows the footprint. Every miner and machine has an <B>orange arrow</B>: it pushes what it makes onto the tile the arrow points at. Press <B>R</B> to rotate before you build.
           </P>
           <P>
             Pick the belt (key <B>1</B>) and <B>drag</B> to lay a line — it follows your mouse. Belts feed straight into machines. Anything that reaches the <B>colony core</B> goes into your stores, and stores pay for new buildings.
@@ -150,7 +150,7 @@ function pages(art: Art): { title: string; kicker: string; body: ReactNode }[] {
             Watch the numbers at the top: each shows your stock and how fast it’s rising or falling per sol. If anything runs out, <B>colony health</B> drops — at 0% the mission fails. Build a <B>MOXIE</B> to make oxygen from the CO₂ air.
           </P>
           <P>
-            A <B>supply ship</B> lands every 1.5 sols. It brings new crew only if there’s free housing and nothing is running out. Every <B>habitat</B> needs a <B>regolith shield</B> within 2 tiles, or its crew soak up radiation.
+            A <B>supply ship</B> lands every 1.5 sols. It brings new crew only if there’s free housing and nothing is running out. Every <B>habitat</B> needs a <B>regolith shield</B> within {SHIELD_REACH[0]} tiles, or its crew soak up radiation.
           </P>
         </>
       ),

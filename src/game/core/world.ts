@@ -49,35 +49,46 @@ export function noise(x: number, y: number, scale: number, seed: number) {
 
 /* --------------------------------- ground --------------------------------- */
 
-/** Top-left tile of the 2×2 colony core, in the middle of the map. */
-export const CORE_AT = MAP / 2 - 1
+/** Top-left tile of the colony core, centred on the map. */
+export const CORE_AT = Math.floor((MAP - BUILDINGS.core.w) / 2)
+/**
+ * Centre of the core's footprint in tile-index coordinates, the same convention the grid
+ * uses for building centres (i + (w − 1) / 2): 47 for a 3×3 core at 46. Use it for
+ * distances and the camera's home instead of `CORE_AT + 0.5`.
+ */
+export const CORE_CENTRE = CORE_AT + (BUILDINGS.core.w - 1) / 2
 
+/**
+ * Ground for a seed. Deposits are sized for 2×2 miners and 3×3 buildings: ice and ore
+ * come in broad patches, boulders and craters are single scattered tiles, the core sits
+ * on a clear pad, and there is starter ice and ore inside the core's power square.
+ */
 export function generateGround(seed: number): Ground[] {
   const g: Ground[] = []
-  const c = CORE_AT + 0.5
+  const c = CORE_CENTRE
   for (let j = 0; j < MAP; j++)
     for (let i = 0; i < MAP; i++) {
       const d = Math.hypot(i - c, j - c)
       let t: Ground = 'sand'
-      const ice = noise(i, j, 6, seed) * 0.7 + noise(i, j, 2.5, seed + 1) * 0.3
-      const ore = noise(i, j, 5, seed + 2) * 0.7 + noise(i, j, 2, seed + 3) * 0.3
+      const ice = noise(i, j, 9, seed) * 0.7 + noise(i, j, 3.75, seed + 1) * 0.3
+      const ore = noise(i, j, 7.5, seed + 2) * 0.7 + noise(i, j, 3, seed + 3) * 0.3
       if (ice > 0.7) t = 'ice'
       else if (ore > 0.71) t = 'ore'
       const r = hash2(i, j, seed + 4)
-      if (r > 0.972) t = 'rock'
-      else if (r < 0.01) t = 'crater'
-      if (d < 3.2) t = 'sand'
+      if (r > 0.986) t = 'rock'
+      else if (r < 0.005) t = 'crater'
+      if (d < 5) t = 'sand'
       g.push(t)
     }
-  // guarantee a starter deposit of each close to the core
+  // guarantee a starter deposit of each close to the core (inside its power square)
   const blob = (ci: number, cj: number, t: Ground, r: number) => {
     for (let j = Math.floor(cj - r); j <= Math.ceil(cj + r); j++)
       for (let i = Math.floor(ci - r); i <= Math.ceil(ci + r); i++)
         if (i >= 0 && j >= 0 && i < MAP && j < MAP && Math.hypot(i - ci, j - cj) <= r) g[j * MAP + i] = t
   }
-  blob(CORE_AT + 7, CORE_AT - 1, 'ice', 1.8)
-  blob(CORE_AT - 2, CORE_AT + 8, 'ore', 1.8)
-  blob(CORE_AT - 8, CORE_AT - 4, 'ice', 1.3)
+  blob(c + 10, c - 1.5, 'ice', 2.8)
+  blob(c - 3, c + 11, 'ore', 2.8)
+  blob(c - 11, c - 6, 'ice', 2)
   return g
 }
 
@@ -86,7 +97,9 @@ export function generateGround(seed: number): Ground[] {
 /**
  * The tile a building pushes its output onto: just past the middle of the
  * footprint edge its arrow faces. For 1×1 buildings that's simply the
- * neighbour in direction `dir`.
+ * neighbour in direction `dir`; on an even edge (2 or 4 tiles) it is the
+ * tile just before the middle (lower i / lower j), e.g. a 4×3 greenhouse
+ * facing +j outputs below its second column.
  */
 export function outTileFor(kind: Kind, i: number, j: number, dir: Dir): [number, number] {
   const { w, h } = BUILDINGS[kind]

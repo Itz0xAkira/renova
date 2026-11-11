@@ -15,9 +15,10 @@
 import Phaser from 'phaser'
 import { BEAM_AX, BEAM_AY, BEAM_H, BEAM_W, ROVER_HALF_LENGTH, ROVER_AX, ROVER_AY, ROVER_H, ROVER_SH_H, ROVER_SH_W, ROVER_W, ROVER_WHEEL_FRAMES, roverKey, roverPoint } from '@/game/art/sprites'
 import { BUILDINGS, MAP, type Dir } from '@/game/core/data'
-import { CORE_AT, type Ent, type Sim } from '@/game/core/sim'
+import type { Ent, Sim } from '@/game/core/sim'
+import { CORE_PLINTH, coreLayout, nearCore, type CoreLayout } from '@/game/render/coreLayout'
 import { setDep, setTex } from '@/game/render/display'
-import { centreX, centreY, DEPTH, unitDepth } from '@/game/render/iso'
+import { centreX, centreY, DEPTH, depthFor, inFront, screenOverlap, unitDepth, type Box } from '@/game/render/iso'
 
 /** Ground point under the middle of a building's footprint. */
 function footCentre(e: Ent) {
@@ -26,25 +27,14 @@ function footCentre(e: Ent) {
   return [centreX(fi, fj), centreY(fi, fj)] as const
 }
 
-/** Where drones live: the centre of the core's 2×2 footprint. */
-const HOME_X = centreX(CORE_AT + 0.5, CORE_AT + 0.5)
-const HOME_Y = centreY(CORE_AT + 0.5, CORE_AT + 0.5)
-
-/** Drone landing pads on the core's back sub-tile, as offsets from its footprint centre (ground px), on a 6 px plinth. */
-const DRONE_PADS: [number, number][] = [
-  [-7, -8],
-  [7, -8],
-]
-const PAD_ALT = 6 + 3
+/** Drones settle on their pads this high: the core's plinth plus their landing legs. */
+const PAD_LIFT = 3
 const WALKER_FRAMES = ['walker_0', 'walker_1']
-
-/** Rover charging bays: the open tiles along the core's two front edges. */
-export const ROVER_BAYS: [number, number][] = [
-  [CORE_AT + 2, CORE_AT],
-  [CORE_AT + 2, CORE_AT + 1],
-  [CORE_AT, CORE_AT + 2],
-  [CORE_AT + 1, CORE_AT + 2],
-]
+/** Half the rover's width across its heading, in tiles. */
+const ROVER_HALF_WIDTH = 0.3
+const WALKER_HALF = 0.2
+/** A parked rover nose-to a building backs off this far, so it never pokes into the footprint. */
+const PARK_BACKOFF = ROVER_HALF_LENGTH - 0.45
 const DIR_I = [1, 0, -1, 0] as const
 const DIR_J = [0, 1, 0, -1] as const
 const DRONE_SPEED = 90 // world px per second
@@ -92,6 +82,9 @@ type Mover = {
   lastTile: number
   /** Rovers only. */
   rover?: RoverState
+  /** Cached draw order, and what it was worked out for. */
+  depth: number
+  depthAt: { fi: number; fj: number; dir: number; rev: number }
 }
 
 type RoverState = {
@@ -121,10 +114,19 @@ export class Units {
   private sparks: Phaser.GameObjects.Image[] = []
   private dust: { img: Phaser.GameObjects.Image; t: number; life: number; vx: number; vy: number }[] = []
   private time = 0
+  /** The colony core's footprint, pads and bays, for the current sim. */
+  private core!: CoreLayout
+  private seen = new Set<number>()
 
   constructor(private scene: Phaser.Scene) {}
 
+  /** Rover charging bays along the core's front edges (drawn on the ground by the scene). */
+  get bays() {
+    return this.core.bays
+  }
+
   reset(sim: Sim) {
+    this.core = coreLayout(sim.core)
     for (const u of this.drones) {
       u.img.destroy()
       u.sh.destroy()
@@ -201,8 +203,7 @@ export class Units {
   /* -------------------------------- drones -------------------------------- */
 
   private ensureDrones(n: number) {
-    const hx = HOME_X
-    const hy = HOME_Y
+    const [hx, hy] = this.core.centre
     while (this.drones.length < n) {
       const k = this.drones.length
       this.drones.push({
@@ -220,30 +221,30 @@ export class Units {
   }
 
   private updateDrones(dt: number, realDt: number, env: Env) {
-    const hx = HOME_X
-    const hy = HOME_Y
+    const [hx, hy] = this.core.centre
+    // the idle orbit scales with the core
+    const orbit = (this.core.w + this.core.h) * 5.5
     const frame = `drone_${Math.floor(this.time * 20) % 2}`
     for (let n = 0; n < this.drones.length; n++) {
       const d = this.drones[n]
       if (d.state === 'idle') {
         const job = this.jobs.shift()
-        const pad = DRONE_PADS[n]
+        const pad = this.core.pads[n]
         if (job) {
           d.job = job
           d.state = 'go'
         } else if (pad) {
           // park on its pad on the core, rotors idling
-          const tx = hx + pad[0]
-          const ty = hy + pad[1]
+          const [tx, ty] = pad
           d.x += (tx - d.x) * Math.min(1, dt * 3)
           d.y += (ty - d.y) * Math.min(1, dt * 3)
           const close = Math.hypot(tx - d.x, ty - d.y) < 2
-          d.alt += ((close ? PAD_ALT : DRONE_ALT) - d.alt) * Math.min(1, dt * 2.5)
+          d.alt += ((close ? CORE_PLINTH + PAD_LIFT : DRONE_ALT) - d.alt) * Math.min(1, dt * 2.5)
         } else {
-          // lazy orbit above the core's pad
+          // lazy orbit above the core
           d.angle += dt * 0.9
-          const tx = hx + Math.cos(d.angle) * 22
-          const ty = hy - 4 + Math.sin(d.angle) * 11
+          const tx = hx + Math.cos(d.angle) * orbit
+          const ty = hy - 4 + Math.sin(d.angle) * orbit * 0.5
           d.x += (tx - d.x) * Math.min(1, dt * 3)
           d.y += (ty - d.y) * Math.min(1, dt * 3)
           d.alt += (DRONE_ALT + 14 + Math.sin(this.time * 2 + d.angle) * 2 - d.alt) * Math.min(1, dt * 2)
@@ -398,8 +399,9 @@ export class Units {
       }
       n = Math.max(n, list.length) // the leavers are still on their way
     }
+    const c = this.core
     while (list.length < n) {
-      const spots = [...this.around(sim, CORE_AT, CORE_AT, 2, 2)]
+      const spots = [...this.around(sim, c.i, c.j, c.w, c.h)]
       if (!spots.length) return
       const s = spots[Math.floor(Math.random() * spots.length)]
       const rover = kind === 'rover'
@@ -413,6 +415,8 @@ export class Units {
             wait: 0.3 + list.length * 0.7,
             toCore: false,
             lastTile: s,
+            depth: 0,
+            depthAt: { fi: NaN, fj: 0, dir: 0, rev: 0 },
             rover: {
               beacon: this.scene.add.image(0, 0, 'rover_beacon').setBlendMode(Phaser.BlendModes.ADD),
               beam: this.scene.add.image(0, 0, 'rover_beam_0').setOrigin(BEAM_AX / BEAM_W, BEAM_AY / BEAM_H).setBlendMode(Phaser.BlendModes.ADD).setDepth(DEPTH.unitShadow + 0.01),
@@ -434,6 +438,8 @@ export class Units {
             wait: 0.3 + list.length * 0.7,
             toCore: false,
             lastTile: s,
+            depth: 0,
+            depthAt: { fi: NaN, fj: 0, dir: 0, rev: 0 },
           }
       list.push(m)
     }
@@ -442,20 +448,21 @@ export class Units {
   private plan(sim: Sim, m: Mover, kind: 'rover' | 'walker') {
     const rover = kind === 'rover'
     const here = [Math.round(m.fi), Math.round(m.fj)] as const
+    const c = this.core
     let goals: Set<number>
     if (m.toCore && rover) {
       // free charging bays first, else anywhere beside the core
-      const bays = new Set(ROVER_BAYS.filter(([i, j]) => this.passable(sim, i, j) && !this.rovers.some((r) => r !== m && r.path.length === 0 && Math.round(r.fi) === i && Math.round(r.fj) === j)).map(([i, j]) => j * MAP + i))
-      goals = bays.size ? bays : this.around(sim, CORE_AT, CORE_AT, 2, 2)
-    } else if (m.toCore || m.leaving) goals = this.around(sim, CORE_AT, CORE_AT, 2, 2)
+      const bays = new Set(c.bays.filter(([i, j]) => this.passable(sim, i, j) && !this.rovers.some((r) => r !== m && r.path.length === 0 && Math.round(r.fi) === i && Math.round(r.fj) === j)).map(([i, j]) => j * MAP + i))
+      goals = bays.size ? bays : this.around(sim, c.i, c.j, c.w, c.h)
+    } else if (m.toCore || m.leaving) goals = this.around(sim, c.i, c.j, c.w, c.h)
     else {
       // rovers visit anything; crew favour places people work
       const sites = [...sim.ents.values()].filter(
         (e) => e.kind !== 'belt' && e.kind !== 'core' && (kind === 'rover' || !['solar', 'shield', 'battery'].includes(e.kind)),
       )
       if (!sites.length) {
-        // nothing built yet: a short survey trip near the lander
-        goals = new Set([(CORE_AT + 3 + Math.floor(Math.random() * 4)) * MAP + CORE_AT - 2 + Math.floor(Math.random() * 6)])
+        // nothing built yet: a short survey trip in front of the lander
+        goals = new Set([(c.j + c.h + 1 + Math.floor(Math.random() * 4)) * MAP + c.i - 2 + Math.floor(Math.random() * (c.w + 4))])
       } else {
         const e = sites[Math.floor(Math.random() * sites.length)]
         goals = this.around(sim, e.i, e.j, BUILDINGS[e.kind].w, BUILDINGS[e.kind].h)
@@ -478,6 +485,7 @@ export class Units {
 
   private step(sim: Sim, m: Mover, dt: number, speed: number, kind: 'rover' | 'walker', env: Env) {
     const rover = kind === 'rover'
+    this.evict(sim, m)
     if (!m.path.length) {
       m.wait -= dt
       if (m.wait <= 0 && !(m.leaving && this.atCore(m))) this.plan(sim, m, kind)
@@ -518,7 +526,7 @@ export class Units {
     const moving = m.path.length > 0 && dt > 0
     const frame = moving ? Math.floor(this.time * (rover ? 8 : 5)) % 2 : 0
     setTex(m.img, WALKER_FRAMES[frame]).setPosition(x, y)
-    setDep(m.img, unitDepth(m.fi, m.fj))
+    setDep(m.img, this.depthOf(sim, m, m.fi, m.fj, 0, WALKER_HALF, WALKER_HALF))
     m.sh.setPosition(x, y).setAlpha(env.shadowAlpha)
   }
 
@@ -558,6 +566,7 @@ export class Units {
   private driveRover(sim: Sim, m: Mover, dt: number, env: Env) {
     const R = m.rover!
     let moved = 0
+    this.evict(sim, m)
     if (!m.path.length) {
       R.v = 0
       m.wait -= dt
@@ -602,7 +611,7 @@ export class Units {
           if (!m.path.length) {
             // unloading at home takes a little longer than loading
             m.wait = R.loaded ? 2 + Math.random() : 1.2 + Math.random()
-            if (R.loaded && this.atCore(m)) R.loaded = false
+            if (R.loaded && nearCore(this.core, m.fi, m.fj)) R.loaded = false
           }
         } else {
           m.fi += (di / dist) * stepLen
@@ -628,16 +637,24 @@ export class Units {
     const frame = Math.floor(R.odo * WHEEL_FRAMES_PER_TILE) % ROVER_WHEEL_FRAMES
     // a little suspension bounce on rough ground
     const bump = moved > 0 && sim.roadLevel(Math.round(m.fi), Math.round(m.fj)) < 2 && Math.floor(R.odo * 6 + R.phase) % 3 === 0 ? 1 : 0
-    const x = Math.round(centreX(m.fi, m.fj))
-    const y = Math.round(centreY(m.fi, m.fj))
+    // parked nose-to a building or the core: back off so the body stays out of its footprint
+    let fi = m.fi
+    let fj = m.fj
+    if (!m.path.length && !this.passable(sim, Math.round(m.fi) + DIR_I[R.dir], Math.round(m.fj) + DIR_J[R.dir])) {
+      fi -= DIR_I[R.dir] * PARK_BACKOFF
+      fj -= DIR_J[R.dir] * PARK_BACKOFF
+    }
+    const x = Math.round(centreX(fi, fj))
+    const y = Math.round(centreY(fi, fj))
     setTex(m.img, roverKey(R.dir, frame, R.loaded)).setPosition(x, y - bump)
-    const depth = unitDepth(m.fi, m.fj)
+    const along = R.dir % 2 === 0
+    const depth = this.depthOf(sim, m, fi, fj, R.dir, along ? ROVER_HALF_LENGTH : ROVER_HALF_WIDTH, along ? ROVER_HALF_WIDTH : ROVER_HALF_LENGTH)
     setDep(m.img, depth)
     setTex(m.sh, `rover_sh_${R.dir}`).setPosition(x, y).setAlpha(env.shadowAlpha)
 
     // beacon: amber blink while driving, slow cyan pulse while charging in a bay, dim when parked elsewhere
     const [bx, by] = roverPoint(R.dir, 'beacon')
-    const charging = !m.path.length && ROVER_BAYS.some(([i, j]) => Math.round(m.fi) === i && Math.round(m.fj) === j)
+    const charging = !m.path.length && this.core.bays.some(([i, j]) => Math.round(m.fi) === i && Math.round(m.fj) === j)
     const t = this.time + R.phase
     const glow = m.path.length ? (Math.floor(t * 2.5) % 2 ? 1 : 0.15) : charging ? 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 2.4)) : 0.25
     R.beacon
@@ -694,6 +711,62 @@ export class Units {
   }
 
   private atCore(m: Mover) {
-    return Math.abs(m.fi - (CORE_AT + 0.5)) <= 2 && Math.abs(m.fj - (CORE_AT + 0.5)) <= 2
+    return nearCore(this.core, m.fi, m.fj)
+  }
+
+  /** Something got built on top of this unit: hop to the nearest open tile and think again. */
+  private evict(sim: Sim, m: Mover) {
+    const i = Math.round(m.fi)
+    const j = Math.round(m.fj)
+    if (this.passable(sim, i, j)) return
+    for (let r = 1; r <= 6; r++)
+      for (let dj = -r; dj <= r; dj++)
+        for (let di = -r; di <= r; di++) {
+          if (Math.max(Math.abs(di), Math.abs(dj)) !== r || !this.passable(sim, i + di, j + dj)) continue
+          m.fi = i + di
+          m.fj = j + dj
+          m.path = []
+          m.wait = 0.2
+          if (m.rover) m.rover.v = 0
+          return
+        }
+  }
+
+  /**
+   * Draw order for a unit at fractional tile (fi, fj) whose ground box reaches
+   * hi/hj tiles either side of its centre: its own row, nudged past any building
+   * it overlaps on screen so it is never drawn over a building it stands
+   * behind (or under one it stands in front of) — which a row alone gets wrong
+   * for a 1.2-tile rover beside big footprints. Cached until it moves or the
+   * layout changes.
+   */
+  private depthOf(sim: Sim, m: Mover, fi: number, fj: number, dir: number, hi: number, hj: number) {
+    const at = m.depthAt
+    if (at.fi === fi && at.fj === fj && at.dir === dir && at.rev === sim.rev) return m.depth
+    at.fi = fi
+    at.fj = fj
+    at.dir = dir
+    at.rev = sim.rev
+    const box: Box = { i0: fi + 0.5 - hi, i1: fi + 0.5 + hi, j0: fj + 0.5 - hj, j1: fj + 0.5 + hj }
+    let lo = -Infinity
+    let up = Infinity
+    const seen = this.seen
+    seen.clear()
+    // buildings are at most 4 tiles across, so anything that can touch the box starts within 4 tiles of it
+    for (let j = Math.floor(box.j0) - 4; j <= Math.floor(box.j1) + 1; j++)
+      for (let i = Math.floor(box.i0) - 4; i <= Math.floor(box.i1) + 1; i++) {
+        const e = sim.entAt(i, j)
+        if (!e || seen.has(e.id) || e.kind === 'belt' || e.kind === 'junction') continue
+        seen.add(e.id)
+        const { w, h } = BUILDINGS[e.kind]
+        const eb: Box = { i0: e.i, i1: e.i + w, j0: e.j, j1: e.j + h }
+        if (!screenOverlap(box, eb, 1)) continue
+        const d = depthFor(e.kind, e.i, e.j)
+        if (inFront(box, eb)) lo = Math.max(lo, d + 0.1)
+        else if (inFront(eb, box)) up = Math.min(up, d - 0.1)
+      }
+    const base = unitDepth(fi, fj)
+    m.depth = lo > up ? lo : Math.min(Math.max(base, lo), up)
+    return m.depth
   }
 }

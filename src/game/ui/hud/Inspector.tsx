@@ -1,6 +1,6 @@
 'use client'
 
-import { BATTERY_KJ_LEVEL, BUILDINGS, ITEMS, MAX_LEVEL, STATION_MAX_PLANTS, UPGRADES, type ItemId } from '@/game/core/data'
+import { BATTERY_KJ_LEVEL, BUILDINGS, ITEMS, MAX_LEVEL, SHIELD_REACH, STATION_MAX_PLANTS, UPGRADES, type ItemId } from '@/game/core/data'
 import { RESERVE_KJ, type Ent } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
 import { Bar, btn, fmt, Icon, Items, panel, Recipe, Row, STATUS, TONE } from './kit'
@@ -101,7 +101,7 @@ export function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb
             }
           />
         )}
-        {e.kind === 'habitat' && <Row k="Shielded" v={e.shielded ? <span className={TONE.good}>Yes</span> : <span className={TONE.warn}>No — shield within 2 tiles</span>} />}
+        {e.kind === 'habitat' && <Row k="Shielded" v={e.shielded ? <span className={TONE.good}>Yes</span> : <span className={TONE.warn}>No — shield within {SHIELD_REACH[0]} tiles</span>} />}
         {e.kind === 'solar' && e.level === MAX_LEVEL && (
           <Row k="Planted" v={`${e.planted} / ${STATION_MAX_PLANTS} panels · next in ${Math.max(0, Math.ceil(e.plantIn))}s`} />
         )}

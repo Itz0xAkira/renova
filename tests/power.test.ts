@@ -7,7 +7,7 @@ const s = new Sim(42)
 s.stock.metal = 5000
 s.stock.brick = 5000
 for (let j = 0; j < MAP; j++) for (let i = 0; i < MAP; i++) if (s.ground[j * MAP + i] !== 'ice' && s.ground[j * MAP + i] !== 'ore') s.ground[j * MAP + i] = 'sand'
-// a lab far outside the core's reach is not connected…
+// a 3×3 lab far outside the core's 12-tile reach is not connected…
 const far = c + 18
 must(s.place('lab', far, c, 0), 'lab')
 s.ensureGrid()
@@ -47,9 +47,10 @@ for (let n = 0; n < 20 * 80; n++) u.step(1 / 20)
 const after = u.count('solar')
 if (after <= before) throw new Error('station planted nothing')
 // upgraded panels make more power, and levels survive saving
-u.time = 14 + 60 // noon
+u.time = 24 + 240 // noon
 u.step(0.05)
-if (Math.abs(u.power.solar - SOLAR_KW[0] * u.sun() * 1) > 0.01) throw new Error('solar per panel')
+if (!(u.sun() > 0.9) || Math.abs(u.power.solar - SOLAR_KW[0] * u.sun()) > 0.01) throw new Error('solar per panel')
+if (Math.abs(u.genKW(sp) - SOLAR_KW[2] * u.sun()) > 0.01) throw new Error('station output')
 const back = Sim.load(JSON.parse(JSON.stringify(u.save())))
 if (back.entAt(c + 4, c + 4)!.level !== 3) throw new Error('level not saved')
 console.log(`OK power grid, priority and upgrades · station planted ${after - before} panels`)

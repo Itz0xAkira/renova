@@ -75,7 +75,7 @@ import { c, check, clean, must, run } from './helpers'
 {
   const s = clean()
   s.stock.metal = 1e7
-  for (let j = 1; j < MAP - 1; j += 3) for (let i = 1; i < MAP - 1; i += 3) if (!s.entAt(i, j)) s.place('pylon', i, j, 0)
+  for (let j = 1; j < MAP - 1; j += 4) for (let i = 1; i < MAP - 1; i += 4) if (!s.entAt(i, j)) s.place('pylon', i, j, 0)
   const t0 = performance.now()
   for (let k = 0; k < 10; k++) {
     s.rev++

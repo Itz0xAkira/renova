@@ -5,15 +5,16 @@
  * isometric maths and draw order in `iso.ts`.
  */
 import Phaser from 'phaser'
-import { bakeAll, bakeTier, beltKey, bKey, FRAMES, isBig, PORT_AX, PORT_AY, PORT_H, PORT_W, CORE_AX, CORE_AY, shKey, SPR_AX, SPR_AY, TER_H, TER_W, terrainCanvas, type TextureSink } from '@/game/art/sprites'
+import { bakeAll, bakeTier, beltKey, bKey, FRAMES, PORT_AX, PORT_AY, PORT_H, PORT_W, shKey, spriteSpec, TER_H, TER_W, terrainCanvas, type TextureSink } from '@/game/art/sprites'
 import { BUILDINGS, DI, DJ, ITEMS, MAP, type Dir, type ItemId, type Kind } from '@/game/core/data'
-import { CORE_AT, outTile, type Ent } from '@/game/core/sim'
+import { outTile, type Ent } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
 import { setDep, setTex } from '@/game/render/display'
 import { MapInput } from '@/game/render/input'
-import { centreOf, centreX, centreY, DEPTH, depthFor, DIR_VEC, itemDepth, JUNCTION_ORIGIN, originOf, ROW, SLOT, top } from '@/game/render/iso'
+import { centreOf, centreX, centreY, DEPTH, depthFor, DIR_VEC, itemDepth, JUNCTION_ORIGIN, originOf, portDepth, top } from '@/game/render/iso'
 import { Overlays } from '@/game/render/overlays'
-import { ROVER_BAYS, Units } from '@/game/render/units'
+import { coreLayout } from '@/game/render/coreLayout'
+import { Units } from '@/game/render/units'
 
 const STEP = 1 / 20
 
@@ -25,8 +26,8 @@ const ICON_STATUS = new Set(['nopower', 'nogrid', 'noinput', 'blocked', 'unshiel
 
 const ITEM_KEY = Object.fromEntries(Object.keys(ITEMS).map((k) => [k, `item_${k}`])) as Record<ItemId, string>
 
-/** The supply ship lands on the open front sub-tile of the core's pad, so it sorts just in front of the core. */
-const SHIP_DEPTH = (CORE_AT * 2 + 1) * ROW + SLOT.ship
+/** How far the camera may wander past the map's edges (world px); more above, where tall buildings on the back rows reach. */
+const CAMERA_MARGIN = { side: 160, top: 280, bottom: 160 }
 
 /** Stamp settings for batched draws into a render texture (inside beginDraw / endDraw). */
 const IN_BATCH = { skipBatch: true }
@@ -83,14 +84,18 @@ export class MarsScene extends Phaser.Scene {
     this.units = new Units(this)
     this.shadows = this.add.renderTexture(0, 0, TER_W, TER_H).setOrigin(0).setDepth(DEPTH.shadows)
     this.roads = this.add.renderTexture(0, 0, TER_W, TER_H).setOrigin(0).setDepth(DEPTH.roads)
-    this.overlays = new Overlays(this, this.store, this.sprites)
-    this.ship = this.add.image(0, 0, 'ship').setOrigin(0.5, 59 / 66).setVisible(false).setDepth(SHIP_DEPTH)
-    this.flame = this.add.image(0, 0, 'flame').setVisible(false).setDepth(SHIP_DEPTH - 0.5)
+    this.overlays = new Overlays(this, this.store, this.sprites, (kind) => this.controls.anchor(kind))
+    this.ship = this.add.image(0, 0, 'ship').setOrigin(0.5, 59 / 66).setVisible(false)
+    this.flame = this.add.image(0, 0, 'flame').setVisible(false)
 
     const cam = this.cameras.main
     cam.setRoundPixels(true)
-    this.store.ui.zoom = window.innerWidth < 700 ? 2 : 3
+    // buildings are big now (a 3×3 core): 2× shows the colony's heart on a desktop, 1× on a phone
+    this.store.ui.zoom = window.innerWidth < 520 ? 1 : 2
     cam.setZoom(this.store.ui.zoom)
+    // keep the map in view: the camera can't be panned off into empty space
+    const m = CAMERA_MARGIN
+    cam.setBounds(-m.side, -m.top, TER_W + 2 * m.side, TER_H + m.top + m.bottom)
     // the camera only knows its real size after the first resize, so centre on the next frame
     this.store.centerRequest = true
 
@@ -172,6 +177,10 @@ export class MarsScene extends Phaser.Scene {
     this.rev = -1
     this.acc = 0
     this.units.reset(sim)
+    // the ship lands on the core's front tile, so it sorts just in front of the core
+    const shipDepth = coreLayout(sim.core).shipDepth
+    this.ship.setDepth(shipDepth)
+    this.flame.setDepth(shipDepth - 0.5)
     this.overlays.reset()
     this.controls.cancel()
     this.shipChain?.stop()
@@ -234,7 +243,7 @@ export class MarsScene extends Phaser.Scene {
     this.overlays.drawCables()
     this.syncPorts()
     // rover bays are drawn with the roads, and only on open tiles in front of the core
-    const bays = ROVER_BAYS.map(([i, j]) => (sim.entAt(i, j) ? 1 : 0)).join('')
+    const bays = this.units.bays.map(([i, j]) => (sim.entAt(i, j) ? 1 : 0)).join('')
     if (bays !== this.baysKey) {
       this.baysKey = bays
       this.roadRev = -1
@@ -267,8 +276,9 @@ export class MarsScene extends Phaser.Scene {
     // reuse the images we have, make or drop the difference
     specs.forEach((p, k) => {
       // the dock sits on the midpoint of the footprint edge facing `dir`
-      const [x, y] = top(p.fi + 0.5 + 0.5 * DI[p.dir], p.fj + 0.5 + 0.5 * DJ[p.dir])
-      const back = p.dir === 2 || p.dir === 3
+      const u = p.fi + 0.5 + 0.5 * DI[p.dir]
+      const v = p.fj + 0.5 + 0.5 * DJ[p.dir]
+      const [x, y] = top(u, v)
       const tex = `port_${p.kind}_${p.dir}_0`
       let port = this.ports[k]
       if (!port) {
@@ -276,7 +286,7 @@ export class MarsScene extends Phaser.Scene {
         this.ports.push(port)
       }
       setTex(port.img, tex).setPosition(x, y)
-      setDep(port.img, depthFor(p.owner.kind, p.owner.i, p.owner.j) + (back ? -0.5 : 0.5))
+      setDep(port.img, portDepth(depthFor(p.owner.kind, p.owner.i, p.owner.j), u, v, p.dir))
       port.owner = p.owner.id
       port.kind = p.kind
       port.dir = p.dir
@@ -299,7 +309,7 @@ export class MarsScene extends Phaser.Scene {
         rt.stamp(`road_${lvl}_${mask}`, undefined, centreX(i, j), centreY(i, j), IN_BATCH)
       }
     // rover charging bays on the open tiles in front of the core
-    for (const [i, j] of ROVER_BAYS) {
+    for (const [i, j] of this.units.bays) {
       const g = sim.groundAt(i, j)
       if (!g || g === 'rock' || g === 'crater' || sim.entAt(i, j)) continue
       rt.stamp('bay', undefined, centreX(i, j), centreY(i, j), BAY_STAMP)
@@ -316,8 +326,8 @@ export class MarsScene extends Phaser.Scene {
       const sk = this.textures.exists(shKey(e.kind, e.level)) ? shKey(e.kind, e.level) : shKey(e.kind, 1)
       if (!this.textures.exists(sk)) continue
       const [x, cy] = centreOf(e.kind, e.i, e.j)
-      const big = isBig(e.kind)
-      rt.stamp(sk, undefined, x - (big ? CORE_AX : SPR_AX), cy - (big ? CORE_AY : SPR_AY), SHADOW_STAMP)
+      const spec = spriteSpec(e.kind)
+      rt.stamp(sk, undefined, x - spec.ax, cy - spec.ay, SHADOW_STAMP)
     }
     rt.endDraw()
   }
@@ -355,7 +365,8 @@ export class MarsScene extends Phaser.Scene {
       if (ICON_STATUS.has(st)) {
         if (!icon) {
           const [x, cy] = centreOf(e.kind, e.i, e.j)
-          const lift = isBig(e.kind) ? 46 : e.kind === 'drill' ? 34 : 26
+          // above the roof: taller for bigger footprints
+          const lift = 22 + (BUILDINGS[e.kind].w + BUILDINGS[e.kind].h) * 8
           icon = this.add.image(x, cy - lift, `icon_${st}`).setDepth(DEPTH.overlay)
           this.icons.set(e.id, icon)
         }
@@ -426,10 +437,8 @@ export class MarsScene extends Phaser.Scene {
     if (sim.ev.ship === this.lastShip) return
     this.lastShip = sim.ev.ship
     this.shipChain?.stop()
-    const [x, y] = top(CORE_AT, CORE_AT)
-    // core centre is (x, y + 16); its front sub-tile centre is 8px lower
-    const tx = x
-    const ty = y + 24 - 6 // the core's plinth is 6 px tall
+    // the landing ring on the core's front tile, up on its plinth
+    const [tx, ty] = coreLayout(sim.core).ring
     this.ship.setPosition(tx, ty - 240).setVisible(true)
     this.flame.setVisible(true)
     const follow = () => this.flame.setPosition(this.ship.x, this.ship.y + 6)

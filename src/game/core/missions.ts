@@ -78,14 +78,14 @@ export const MISSIONS: Mission[] = [
   {
     id: 'washer',
     title: 'Clean the soil',
-    text: 'Build a soil washer (2×2) and feed it regolith and water from two sides.',
+    text: 'Build a soil washer (3×3) and feed it regolith and water from two sides.',
     tip: 'Martian soil holds ~0.6% toxic perchlorate. Water rinses it out.',
     check: (s) => has(s, 'washer'),
   },
   {
     id: 'harvest',
     title: 'First harvest',
-    text: 'Build a greenhouse (3×2), feed it clean soil and water, and deliver 10 food.',
+    text: 'Build a greenhouse (4×3), feed it clean soil and water, and deliver 10 food.',
     tip: 'Greenhouse: 2 soil + 3 water → 4 food. Give each ingredient its own belt.',
     check: (s) => s.delivered.food >= 10,
     progress: (s) => [Math.min(10, s.delivered.food), 10],
@@ -102,7 +102,7 @@ export const MISSIONS: Mission[] = [
   {
     id: 'habitat',
     title: 'Safe at home',
-    text: 'Build a habitat (key 8) within 2 tiles of a regolith shield (key 9).',
+    text: 'Build a habitat (key 8) within 3 tiles of a regolith shield (key 9).',
     tip: 'About 2 m of regolith blocks most surface radiation. Supply ships bring crew only if there’s room.',
     check: (s) => any(s, 'habitat', (e) => e.shielded),
   },
@@ -124,12 +124,3 @@ export const MISSIONS: Mission[] = [
   },
 ]
 
-/**
- * Mission lists that v1 saves indexed into, for migrating their `mission` number.
- * The first release had 12 missions; the grid/upgrade release added two more.
- * v1 saves from the first release store buildings without a level.
- */
-export const V1_MISSION_IDS = {
-  first: ['power', 'water', 'melt', 'battery', 'metal', 'brick', 'moxie', 'washer', 'harvest', 'science', 'habitat', 'colony'],
-  grid: ['power', 'water', 'melt', 'battery', 'grid', 'metal', 'brick', 'moxie', 'washer', 'harvest', 'science', 'habitat', 'upgrade', 'colony'],
-}

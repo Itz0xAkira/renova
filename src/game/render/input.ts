@@ -7,10 +7,9 @@
  * popup or the guide covers the map).
  */
 import type Phaser from 'phaser'
-import { BUILDINGS, type Dir } from '@/game/core/data'
-import { CORE_AT } from '@/game/core/sim'
+import { BUILDINGS, type Dir, type Kind } from '@/game/core/data'
 import type { GameStore } from '@/game/store'
-import { anchorFor, stepDir, tileAtWorld, top, type Tile } from '@/game/render/iso'
+import { anchorAt, anchorFor, centreOf, groundUV, stepDir, tileAtWorld, type Tile } from '@/game/render/iso'
 
 const ZOOMS = [1, 2, 3, 4, 5, 6]
 /** Screen px a press may wander before it counts as a drag. */
@@ -21,11 +20,15 @@ type Drag = {
   mode: 'place' | 'remove' | 'pan'
   /** Last map tile the drag acted on (null until it enters the map). */
   last: Tile | null
+  /** Where the press started (screen px), to tell a click from a drag. */
   sx: number
   sy: number
-  scrollX: number
-  scrollY: number
+  /** Pointer at the last move (screen px): pans move by the difference. */
+  px: number
+  py: number
   moved: boolean
+  /** Placing: the footprint's first tile relative to the tile under the cursor, fixed at the press so a dragged row stays evenly spaced. */
+  off: { kind: Kind; di: number; dj: number } | null
   /** Entities built during this drag. */
   placed: Set<number>
   /** Touch: the first tile, placed only once the finger moves or lifts (a second finger cancels it). */
@@ -72,8 +75,9 @@ export class MapInput {
   /* -------------------------------- camera -------------------------------- */
 
   centerOnCore() {
-    const [x, y] = top(CORE_AT, CORE_AT)
-    this.scene.cameras.main.centerOn(x, y + 16)
+    const c = this.store.sim.core
+    const [x, y] = centreOf(c.kind, c.i, c.j)
+    this.scene.cameras.main.centerOn(x, y)
   }
 
   zoomBy(step: number, sx = this.scene.scale.width / 2, sy = this.scene.scale.height / 2) {
@@ -87,15 +91,6 @@ export class MapInput {
     const after = cam.getWorldPoint(sx, sy)
     cam.scrollX += before.x - after.x
     cam.scrollY += before.y - after.y
-    // a pan in progress continues from the new view
-    const d = this.drag
-    if (d && d.mode === 'pan') {
-      d.scrollX = cam.scrollX
-      d.scrollY = cam.scrollY
-      const p = this.scene.input.activePointer
-      d.sx = p.x
-      d.sy = p.y
-    }
     this.store.ui.zoom = next
     this.store.bump()
   }
@@ -132,7 +127,32 @@ export class MapInput {
     if (k.S.isDown || k.DOWN.isDown) cam.scrollY += v
     // the camera may have moved under the pointer (keys, zoom): re-pick the tile
     const p = this.scene.input.activePointer
-    if (p.wasTouch ? p.isDown : this.mouseOver) this.setHover(this.tileAt(p.x, p.y))
+    if (p.wasTouch ? p.isDown : this.mouseOver) this.pointAt(p.x, p.y)
+  }
+
+  /** Ground point under the pointer (continuous tile coords), for centring multi-tile builds under the cursor. */
+  private uv: readonly [number, number] | null = null
+
+  /** Track the ground under screen point (sx, sy): the hover tile and the exact point. */
+  private pointAt(sx: number, sy: number) {
+    const w = this.scene.cameras.main.getWorldPoint(sx, sy)
+    const t = tileAtWorld(w.x, w.y)
+    this.uv = t ? groundUV(w.x, w.y) : null
+    this.setHover(t)
+    return t
+  }
+
+  /**
+   * The first tile of a `kind` footprint placed from where the pointer is: the
+   * footprint centred under the cursor, or, mid-drag, offset from the hovered
+   * tile the same way as at the press. Null off the map.
+   */
+  anchor(kind: Kind): readonly [number, number] | null {
+    const h = this.store.ui.hover
+    if (!h) return null
+    const off = this.drag?.off
+    if (off && off.kind === kind) return [h[0] + off.di, h[1] + off.dj]
+    return this.uv ? anchorAt(kind, this.uv[0], this.uv[1]) : anchorFor(kind, h[0], h[1])
   }
 
   private setHover(t: Tile | null) {
@@ -164,9 +184,11 @@ export class MapInput {
       this.pinch = { d: Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y), zoom: this.store.ui.zoom }
       return
     }
-    const cam = this.scene.cameras.main
-    const t = this.tileAt(p.x, p.y)
-    const base = { sx: p.x, sy: p.y, scrollX: cam.scrollX, scrollY: cam.scrollY, moved: false, last: t, placed: new Set<number>(), pending: null, crossing: null }
+    const t = this.pointAt(p.x, p.y)
+    const tool = this.store.ui.tool
+    const a = tool && t ? this.anchor(tool) : null
+    const off = tool && t && a ? { kind: tool, di: a[0] - t[0], dj: a[1] - t[1] } : null
+    const base = { sx: p.x, sy: p.y, px: p.x, py: p.y, moved: false, last: t, placed: new Set<number>(), pending: null, crossing: null, off }
     if (p.rightButtonDown()) {
       this.drag = { mode: 'remove', ...base }
       if (t) this.store.removeAt(t[0], t[1])
@@ -184,8 +206,7 @@ export class MapInput {
   private onMove(p: Phaser.Input.Pointer) {
     if (this.blocked) return
     if (!p.wasTouch) this.mouseOver = true
-    const t = this.tileAt(p.x, p.y)
-    this.setHover(t)
+    const t = this.pointAt(p.x, p.y)
     this.store.ui.pointer = [p.x, p.y]
     if (this.pinch) {
       const pts = this.scene.input.manager.pointers.filter((q) => q.isDown)
@@ -201,9 +222,12 @@ export class MapInput {
     if (!d || !p.isDown) return
     if (!d.moved && Math.abs(p.x - d.sx) + Math.abs(p.y - d.sy) > DRAG_SLOP) d.moved = true
     if (d.mode === 'pan') {
+      // move by this step's delta and keep within the camera bounds, so dragging past an edge and back has no dead zone
       const cam = this.scene.cameras.main
-      cam.scrollX = d.scrollX - (p.x - d.sx) / cam.zoom
-      cam.scrollY = d.scrollY - (p.y - d.sy) / cam.zoom
+      cam.scrollX = cam.clampX(cam.scrollX - (p.x - d.px) / cam.zoom)
+      cam.scrollY = cam.clampY(cam.scrollY - (p.y - d.py) / cam.zoom)
+      d.px = p.x
+      d.py = p.y
       return
     }
     if (d.pending) {
@@ -238,8 +262,13 @@ export class MapInput {
     const d = this.drag
     this.cancel()
     if (!d || this.blocked) return
-    // a touch tap places on release
-    if (d.pending) return this.placeAt(d.pending[0], d.pending[1])
+    // a touch tap places on release, with the drag's footprint offset
+    if (d.pending) {
+      this.drag = d
+      this.placeAt(d.pending[0], d.pending[1])
+      this.drag = null
+      return
+    }
     if (d.moved || d.mode !== 'pan' || p.button !== 0) return
     // a click without a tool selects
     const t = this.tileAt(p.x, p.y)
@@ -274,7 +303,8 @@ export class MapInput {
   private placeAt(hi: number, hj: number, entry?: Dir) {
     const tool = this.store.ui.tool
     if (!tool) return
-    const [i, j] = anchorFor(tool, hi, hj)
+    const off = this.drag?.off
+    const [i, j] = off && off.kind === tool ? [hi + off.di, hj + off.dj] : anchorFor(tool, hi, hj)
     const sim = this.store.sim
     const there = sim.entAt(i, j)
     if (tool === 'belt' && there) {

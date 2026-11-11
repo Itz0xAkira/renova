@@ -14,8 +14,9 @@ import { PYLON_TOP } from '@/game/art/structures'
 import { BUILDINGS, CORE_LINK, MAP, PYLON_LINK, PYLON_REACH, SHIELD_REACH, type Kind } from '@/game/core/data'
 import { outTileFor, type Ent } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
+import { CORE_ANTENNA } from '@/game/render/coreLayout'
 import { setDep, setTex } from '@/game/render/display'
-import { anchorFor, centreOf, centreX, centreY, DEPTH, depthFor, JUNCTION_ORIGIN, originOf, top } from '@/game/render/iso'
+import { centreOf, centreX, centreY, DEPTH, depthFor, JUNCTION_ORIGIN, originOf, top } from '@/game/render/iso'
 
 /** Cables hang above the map's top edge (pylon tops on the back rows), so their layer starts higher. */
 const CABLE_PAD = 64
@@ -66,6 +67,8 @@ export class Overlays {
     private scene: Phaser.Scene,
     private store: GameStore,
     private sprites: Sprites,
+    /** First tile of a footprint placed from the pointer (see MapInput.anchor). */
+    private anchor: (kind: Kind) => readonly [number, number] | null,
   ) {
     const add = scene.add
     if (!scene.textures.exists(TILE_KEY)) scene.textures.addCanvas(TILE_KEY, tileCanvas())
@@ -97,7 +100,7 @@ export class Overlays {
   private nodeTop(e: Ent): [number, number] {
     const [x, y] = centreOf(e.kind, e.i, e.j)
     if (e.kind === 'pylon') return [x, y - 1 - PYLON_TOP[e.level - 1]]
-    return [x + 16, y - 6 - 22] // the antenna on the core's crew module
+    return [x + CORE_ANTENNA[0], y + CORE_ANTENNA[1]] // the antenna on the core's crew module
   }
 
   /** Sagging power cables between linked grid nodes, drawn pixel by pixel when the links change. */
@@ -167,7 +170,7 @@ export class Overlays {
 
     if (h && tool) {
       // build preview: footprint outline, ghost sprite and output arrow
-      const [i, j] = anchorFor(tool, h[0], h[1])
+      const [i, j] = this.anchor(tool) ?? h
       const err = sim.placeError(tool, i, j)
       ui.hoverErr = err
       this.outline(tool, i, j, err ? 0xff5a4f : 0xfff7e8, 0.95)
@@ -218,7 +221,8 @@ export class Overlays {
     const tool = this.store.ui.tool
     let area: [Kind, number, number] | null = null
     let reach = SHIELD_REACH[0]
-    if ((tool === 'shield' || tool === 'habitat') && h) area = [tool, ...anchorFor(tool, h[0], h[1])]
+    const a = (tool === 'shield' || tool === 'habitat') && h ? this.anchor(tool) : null
+    if (tool && a) area = [tool, a[0], a[1]]
     else if (sel && (sel.kind === 'shield' || sel.kind === 'habitat')) {
       area = [sel.kind, sel.i, sel.j]
       if (sel.kind === 'shield') reach = SHIELD_REACH[sel.level - 1]

@@ -4,7 +4,7 @@
  */
 
 export const SOL = 120 // game seconds per sol
-export const MAP = 64 // map is MAP × MAP tiles
+export const MAP = 96 // map is MAP × MAP tiles
 
 export type Dir = 0 | 1 | 2 | 3 // 0:+i  1:+j  2:-i  3:-j
 export const DI = [1, 0, -1, 0] as const
@@ -59,7 +59,7 @@ export type BuildingDef = {
   /** kW drawn while active. Generators use `gen` instead. */
   power: number
   gen?: number
-  /** Footprint in tiles: w along +i, h along +j. 1×1, 2×2 (4 tiles) or 3×2 (6 tiles). */
+  /** Footprint in tiles: w along +i, h along +j. 1×1 (belts, junctions, pylons), 2×2, 3×3 or 4×3 (greenhouse). */
   w: number
   h: number
   recipe?: Recipe
@@ -82,8 +82,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'A Mars lander has to carry everything for the first weeks — after that, the crew lives on what they make.',
     cost: {},
     power: 5,
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     housing: 4,
     group: 'logistics',
   },
@@ -120,8 +120,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'Radar from orbit has found thick sheets of water ice just under the surface at mid-latitudes on Mars.',
     cost: { metal: 10 },
     power: 10,
-    w: 1,
-    h: 1,
+    w: 2,
+    h: 2,
     mines: { ice: 'ice' },
     mineTime: 2.5,
     outputs: true,
@@ -135,8 +135,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'Hematite — iron oxide — is part of why Mars is red. Opportunity rover found tiny hematite “blueberries” everywhere.',
     cost: { metal: 10 },
     power: 10,
-    w: 1,
-    h: 1,
+    w: 2,
+    h: 2,
     mines: { sand: 'regolith', ore: 'ore' },
     mineTime: 2.5,
     outputs: true,
@@ -150,8 +150,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'At 0.6% of Earth’s air pressure, liquid water boils or freezes in the open — it has to be melted indoors.',
     cost: { metal: 8, brick: 4 },
     power: 15,
-    w: 1,
-    h: 1,
+    w: 2,
+    h: 2,
     recipe: { in: { ice: 1 }, out: { water: 2 }, time: 2 },
     outputs: true,
     group: 'process',
@@ -164,8 +164,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'Iron can be made on Mars by stripping oxygen from iron oxide — and that oxygen is useful too.',
     cost: { metal: 12, brick: 6 },
     power: 30,
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     recipe: { in: { ore: 2 }, out: { metal: 1 }, time: 3 },
     outputs: true,
     group: 'process',
@@ -178,8 +178,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'Heating regolith until the grains fuse (sintering) makes bricks without cement or water.',
     cost: { metal: 10 },
     power: 20,
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     recipe: { in: { regolith: 2 }, out: { brick: 1 }, time: 3 },
     outputs: true,
     group: 'process',
@@ -192,8 +192,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'Phoenix lander found ~0.6% perchlorate in Martian soil — toxic to people, so it must be washed out before farming.',
     cost: { metal: 10, brick: 4 },
     power: 8,
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     recipe: { in: { regolith: 1, water: 1 }, out: { soil: 1 }, time: 2.5 },
     outputs: true,
     group: 'process',
@@ -202,12 +202,12 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     kind: 'greenhouse',
     name: 'Greenhouse',
     short: 'Greenhouse',
-    desc: 'A 6-tile glass greenhouse. Grows food from clean soil and water under red and blue LEDs, and releases oxygen.',
+    desc: 'A 4×3 glass greenhouse. Grows food from clean soil and water under red and blue LEDs, and releases oxygen.',
     fact: 'Plants absorb mostly red (≈660 nm) and blue (≈450 nm) light, so grow lamps skip the rest to save power.',
     cost: { metal: 20, brick: 20 },
     power: 30,
-    w: 3,
-    h: 2,
+    w: 4,
+    h: 3,
     recipe: { in: { soil: 2, water: 3 }, out: { food: 4 }, time: 10 },
     outputs: true,
     group: 'life',
@@ -220,20 +220,20 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'NASA’s MOXIE on the Perseverance rover made oxygen from Mars air 16 times between 2021 and 2023.',
     cost: { metal: 15 },
     power: 25,
-    w: 1,
-    h: 1,
+    w: 2,
+    h: 2,
     group: 'life',
   },
   habitat: {
     kind: 'habitat',
     name: 'Habitat',
     short: 'Habitat',
-    desc: 'Pressurised home for 6 colonists. Needs a regolith shield within 2 tiles.',
+    desc: 'Pressurised home for 6 colonists. Needs a regolith shield within 3 tiles.',
     fact: 'Without a magnetic field or thick air, Mars’ surface gets far more space radiation than Earth’s.',
     cost: { metal: 10, brick: 20 },
     power: 5,
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     housing: 6,
     group: 'life',
   },
@@ -241,12 +241,12 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     kind: 'shield',
     name: 'Regolith shield',
     short: 'Shield',
-    desc: 'A thick berm of packed regolith. Protects habitats within 2 tiles from radiation.',
+    desc: 'A thick berm of packed regolith. Protects habitats within 3 tiles from radiation.',
     fact: 'About 2 metres of regolith overhead blocks most of the radiation that reaches the Martian surface.',
     cost: { brick: 15 },
     power: 0,
-    w: 1,
-    h: 1,
+    w: 2,
+    h: 2,
     group: 'life',
   },
   solar: {
@@ -258,8 +258,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     cost: { metal: 6 },
     power: 0,
     gen: 20,
-    w: 1,
-    h: 1,
+    w: 2,
+    h: 2,
     group: 'power',
   },
   pylon: {
@@ -282,8 +282,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'A Mars day (a sol) lasts 24 hours 39 minutes — about 12 hours of darkness to store energy for.',
     cost: { metal: 10 },
     power: 0,
-    w: 1,
-    h: 1,
+    w: 2,
+    h: 2,
     group: 'power',
   },
   reactor: {
@@ -295,8 +295,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     cost: { metal: 60, brick: 30 },
     power: 0,
     gen: 120,
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     research: 'kilopower',
     group: 'power',
   },
@@ -308,8 +308,8 @@ export const BUILDINGS: Record<Kind, BuildingDef> = {
     fact: 'Every rover and lander on Mars is a science lab — Curiosity carries a full chemistry lab in its belly.',
     cost: { metal: 15, brick: 10 },
     power: 15,
-    w: 2,
-    h: 2,
+    w: 3,
+    h: 3,
     group: 'science',
   },
 }
@@ -414,8 +414,8 @@ export const NEEDS = { food: 2, water: 2, o2: 2 }
 /* --------------------------------- grid ---------------------------------- */
 
 /** Coverage half-width (tiles beyond the footprint) and cable reach of grid nodes. */
-export const CORE_REACH = 8
-export const CORE_LINK = 12
+export const CORE_REACH = 12
+export const CORE_LINK = 18
 
 /* ------------------------------- upgrades -------------------------------- */
 
@@ -445,7 +445,7 @@ export const UPGRADES: Partial<Record<Kind, Upgrade>> = {
   moxie: mk('MOXIE', ['50% more oxygen', '120% more oxygen']),
   lab: mk('Research lab', ['50% more research', '120% more research']),
   habitat: mk('Habitat', ['Houses 8', 'Houses 10']),
-  shield: mk('Regolith shield', ['Protects within 3 tiles', 'Protects within 4 tiles']),
+  shield: mk('Regolith shield', ['Protects within 4 tiles', 'Protects within 6 tiles']),
 }
 
 /** Work-speed multiplier by level, and the extra power that speed costs. */
@@ -455,9 +455,10 @@ export const SOLAR_KW = [20, 34, 52]
 export const BATTERY_KJ_LEVEL = [3000, 6500, 12000]
 export const REACTOR_KW = [120, 170, 240]
 export const HABITAT_BEDS = [6, 8, 10]
-export const SHIELD_REACH = [2, 3, 4]
-export const PYLON_REACH = [4, 6, 8]
-export const PYLON_LINK = [9, 12, 16]
+/** Tiles of open ground allowed between a shield's footprint and a habitat's. */
+export const SHIELD_REACH = [3, 4, 6]
+export const PYLON_REACH = [6, 9, 12]
+export const PYLON_LINK = [13, 18, 24]
 /** A solar station plants a new panel this often (game seconds), up to this many around it. */
 export const STATION_PLANT_EVERY = 25
 export const STATION_MAX_PLANTS = 8

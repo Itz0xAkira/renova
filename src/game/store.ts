@@ -4,7 +4,7 @@
  * All UI actions go through here so the HUD, the keyboard and the scene agree.
  */
 import { type Dir, type Kind } from '@/game/core/data'
-import { Sim, type Ent, type SaveData } from '@/game/core/sim'
+import { OutdatedSaveError, Sim, type Ent, type SaveData } from '@/game/core/sim'
 
 const SAVE_KEY = 'renova-save-v1'
 /** Where an unreadable save is kept, so a bad save never crashes the game twice and nothing is silently lost. */
@@ -82,8 +82,11 @@ export class GameStore {
         } catch {
           /* storage unavailable */
         }
-        this.notice = 'Your last save could not be loaded, so a new colony was started. A copy was kept.'
-        console.warn('[renova] unreadable save', err)
+        this.notice =
+          err instanceof OutdatedSaveError
+            ? 'RENOVA has grown: buildings are bigger and the map is larger, so older colonies no longer fit. A new colony was started. Your old save was kept.'
+            : 'Your last save could not be loaded, so a new colony was started. A copy was kept.'
+        if (!(err instanceof OutdatedSaveError)) console.warn('[renova] unreadable save', err)
       }
     }
     this.sim = sim ?? GameStore.fresh()

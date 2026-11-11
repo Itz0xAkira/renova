@@ -4,17 +4,18 @@ import { c, check, clean, must, run } from './helpers'
 // battery banks keep their own charge: cutting them off the grid no longer deletes it
 {
   const s = clean()
-  must(s.place('pylon', c + 12, c, 0))
-  for (let k = 0; k < 4; k++) must(s.place('battery', c + 13 + k, c, 0))
+  // a pylon just within cable reach of the core, with three 2×2 banks only it covers
+  must(s.place('pylon', c + 18, c, 0))
+  for (let k = 0; k < 3; k++) must(s.place('battery', c + 19 + 2 * k, c, 0))
   s.time = 60 // no panels, so nothing charges
   for (const b of s.list('battery')) b.charge = 3000
   s.step(0.05)
   const full = s.power.stored
-  check(Math.abs(full - (RESERVE_KJ + 12000)) < 5, `connected pool ${full}`)
-  s.remove(c + 12, c)
+  check(Math.abs(full - (RESERVE_KJ + 9000)) < 5, `connected pool ${full}`)
+  s.remove(c + 18, c)
   s.step(0.05)
   check(s.power.stored <= RESERVE_KJ && s.list('battery').every((b) => b.charge > 2990), `cut-off banks lost charge: ${s.list('battery').map((b) => b.charge)}`)
-  must(s.place('pylon', c + 12, c, 0))
+  must(s.place('pylon', c + 18, c, 0))
   s.step(0.05)
   check(Math.abs(s.power.stored - full) < 10, `reconnected pool ${s.power.stored} vs ${full}`)
 }
@@ -22,8 +23,8 @@ import { c, check, clean, must, run } from './helpers'
 // energy is conserved while the pool is shared out: charge in = generation − demand
 {
   const s = clean()
-  for (let k = 0; k < 3; k++) must(s.place('battery', c + 3 + k, c + 3, 0))
-  for (let k = 0; k < 6; k++) must(s.place('solar', c - 4 + k, c - 4, 0))
+  for (let k = 0; k < 3; k++) must(s.place('battery', c + 4 + 2 * k, c + 4, 0))
+  for (let k = 0; k < 6; k++) must(s.place('solar', c - 6 + 2 * k, c - 6, 0))
   s.time = 24 // noon
   s.reserve = 0
   s.step(0.05)
@@ -47,8 +48,8 @@ import { c, check, clean, must, run } from './helpers'
 // at night with no generation, stored power runs life support first
 {
   const s = clean()
-  must(s.place('battery', c + 3, c + 3, 0))
-  must(s.place('lab', c - 4, c + 3, 0))
+  must(s.place('battery', c + 4, c + 4, 0))
+  must(s.place('lab', c - 5, c + 4, 0))
   s.time = 14 + 120 * 0.5
   s.reserve = 0
   s.list('battery')[0].charge = 0.5

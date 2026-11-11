@@ -36,11 +36,12 @@ import {
   type ResearchId,
   type StockId,
 } from '@/game/core/data'
-import { MISSIONS, V1_MISSION_IDS } from '@/game/core/missions'
+import { MISSIONS } from '@/game/core/missions'
 import {
   IN_BACK,
   IN_N,
   IN_P,
+  OutdatedSaveError,
   SAVE_VERSION,
   type BeltItem,
   type Ent,
@@ -264,8 +265,31 @@ export class Sim {
         if (g === 'crater') return 'Crater — unstable ground'
         if (this.occ[(j + dj) * MAP + i + di]) return 'Tile is taken'
       }
-    if (def.mines && !def.mines[this.groundAt(i, j)!]) return kind === 'drill' ? 'Ice drills need an ice deposit' : 'Excavators need sand or ore'
+    if (def.mines && !this.mineItemAt(kind, i, j)) return kind === 'drill' ? 'Ice drills need an ice deposit' : 'Excavators need sand or ore'
     return null
+  }
+
+  /**
+   * What a miner placed at (i, j) digs. It works if any tile of its footprint is minable,
+   * and digs the yield of the most common minable ground under it (a tie goes to the
+   * richer ground: ice, then ore, then sand). Null when nothing under it is minable.
+   */
+  mineItemAt(kind: Kind, i: number, j: number): ItemId | null {
+    const def = BUILDINGS[kind]
+    if (!def.mines) return null
+    const order: Ground[] = ['ice', 'ore', 'sand']
+    let best: Ground | null = null
+    let bestN = 0
+    for (const g of order) {
+      if (!def.mines[g]) continue
+      let n = 0
+      for (let dj = 0; dj < def.h; dj++) for (let di = 0; di < def.w; di++) if (this.groundAt(i + di, j + dj) === g) n++
+      if (n > bestN) {
+        best = g
+        bestN = n
+      }
+    }
+    return best ? def.mines[best]! : null
   }
 
   /* -------------------------------- actions ------------------------------- */
@@ -286,7 +310,7 @@ export class Sim {
       working: false,
       status: 'idle',
       items: [],
-      mineItem: def.mines ? (def.mines[this.groundAt(i, j)!] ?? null) : null,
+      mineItem: this.mineItemAt(kind, i, j),
       shielded: false,
       residents: 0,
       outCursor: 0,
@@ -527,11 +551,20 @@ export class Sim {
         e.onGrid = joined.has(e)
         continue
       }
-      const { w, h } = BUILDINGS[e.kind]
-      let on = false
-      for (let dj = 0; dj < h && !on; dj++) for (let di = 0; di < w && !on; di++) on = this.covered[(e.j + dj) * MAP + e.i + di] === 1
-      e.onGrid = on
+      e.onGrid = this.anyCovered(e.kind, e.i, e.j)
     }
+  }
+
+  /** Is any tile of a `kind` footprint at (i, j) inside grid coverage? (How buildings join the grid.) */
+  private anyCovered(kind: Kind, i: number, j: number) {
+    const { w, h } = BUILDINGS[kind]
+    for (let dj = 0; dj < h; dj++)
+      for (let di = 0; di < w; di++) {
+        const x = i + di
+        const y = j + dj
+        if (x >= 0 && y >= 0 && x < MAP && y < MAP && this.covered[y * MAP + x]) return true
+      }
+    return false
   }
 
   /* ------------------------------- belts -------------------------------- */
@@ -587,14 +620,21 @@ export class Sim {
 
   /* ------------------------------ machines ------------------------------ */
 
+  /**
+   * Square-wise distance between the nearest tiles of two footprints: 1 when they touch,
+   * 2 with one tile of ground between them, 0 if they overlap.
+   */
+  static gap(a: { kind: Kind; i: number; j: number }, b: { kind: Kind; i: number; j: number }) {
+    const A = BUILDINGS[a.kind]
+    const B = BUILDINGS[b.kind]
+    const gi = Math.max(0, a.i - (b.i + B.w - 1), b.i - (a.i + A.w - 1))
+    const gj = Math.max(0, a.j - (b.j + B.h - 1), b.j - (a.j + A.h - 1))
+    return Math.max(gi, gj)
+  }
+
   private updateShielding() {
     const shields = this.list('shield')
-    for (const e of this.list('habitat')) {
-      // distance from the shield to the nearest tile of the habitat's footprint
-      const { w, h } = BUILDINGS[e.kind]
-      const gap = (s: Ent) => Math.max(Math.max(0, e.i - s.i, s.i - (e.i + w - 1)), Math.max(0, e.j - s.j, s.j - (e.j + h - 1)))
-      e.shielded = shields.some((s) => gap(s) <= SHIELD_REACH[s.level - 1])
-    }
+    for (const e of this.list('habitat')) e.shielded = shields.some((s) => Sim.gap(s, e) <= SHIELD_REACH[s.level - 1])
   }
 
   /**
@@ -949,15 +989,13 @@ export class Sim {
       if (e.plantIn > 0) continue
       e.plantIn = STATION_PLANT_EVERY
       if (this.stock.metal < (BUILDINGS.solar.cost.metal ?? 0)) continue
+      // free spots for a whole panel, nearest ring first: touching the station, then 1 or 2 tiles out
+      const { w, h } = BUILDINGS.solar
       const spots: [number, number][] = []
-      for (let r = 1; r <= 2 && !spots.length; r++)
-        for (let dj = -r; dj <= r; dj++)
-          for (let di = -r; di <= r; di++) {
-            if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue
-            const i = e.i + di
-            const j = e.j + dj
-            if (!this.placeError('solar', i, j) && this.covered[j * MAP + i]) spots.push([i, j])
-          }
+      for (let r = 1; r <= 3 && !spots.length; r++)
+        for (let j = e.j - h - r + 1; j <= e.j + h + r - 1; j++)
+          for (let i = e.i - w - r + 1; i <= e.i + w + r - 1; i++)
+            if (Sim.gap(e, { kind: 'solar', i, j }) === r && !this.placeError('solar', i, j) && this.anyCovered('solar', i, j)) spots.push([i, j])
       if (!spots.length) continue
       const [i, j] = spots[Math.floor(this.rng() * spots.length)]
       this.place('solar', i, j, 0)
@@ -1140,15 +1178,16 @@ export class Sim {
   }
 
   /**
-   * Rebuild a sim from a save of any known version (v1 is migrated). Every field is
-   * validated and defaulted, so a damaged save loads as far as it can; input that is
-   * hopeless (not an object, unknown version, no seed) throws.
+   * Rebuild a sim from a current (v3) save. Every field is validated and defaulted, so a
+   * damaged save loads as far as it can. Saves from older layouts (v1, v2) throw
+   * `OutdatedSaveError`; input that is hopeless (not an object, unknown version, no seed)
+   * throws a plain Error.
    */
   static load(raw: unknown): Sim {
     if (!raw || typeof raw !== 'object') throw new Error('save is not an object')
     const d = raw as Record<string, unknown>
-    if (d.v !== 1 && d.v !== SAVE_VERSION) throw new Error(`unknown save version ${String(d.v)}`)
-    const v1 = d.v === 1
+    if (typeof d.v === 'number' && Number.isInteger(d.v) && d.v >= 1 && d.v < SAVE_VERSION) throw new OutdatedSaveError(d.v)
+    if (d.v !== SAVE_VERSION) throw new Error(`unknown save version ${String(d.v)}`)
     if (typeof d.seed !== 'number' || !Number.isFinite(d.seed)) throw new Error('save has no seed')
     const s = new Sim(d.seed)
     const num = (x: unknown, def: number, lo = -Infinity, hi = Infinity) => (typeof x === 'number' && Number.isFinite(x) ? clamp(x, lo, hi) : def)
@@ -1202,26 +1241,12 @@ export class Sim {
       if (typeof k === 'number' && Number.isInteger(k) && k >= 0 && k < s.wear.length) s.wear[k] = int(w, 0, 0, 255)
     }
 
-    // missions: v2 stores the id; v1 stored an index into whichever list the game had then
-    if (v1) {
-      const tuples = arr(d.ents)
-      const old = tuples.length && tuples.every((t) => arr(t).length < 5) ? V1_MISSION_IDS.first : V1_MISSION_IDS.grid
-      const doneIds = new Set(old.slice(0, int(d.mission, 0, 0, old.length)))
-      // resume at the first mission the old save hadn't finished; finished ones re-check instantly
-      const at = MISSIONS.findIndex((m) => !doneIds.has(m.id))
-      s.mission = at < 0 ? MISSIONS.length : at
-    } else {
-      const at = d.mission === null ? MISSIONS.length : MISSIONS.findIndex((m) => m.id === d.mission)
-      s.mission = at < 0 ? 0 : at
-    }
+    // missions are stored by id (null once all are done; an unknown id starts the list again)
+    const at = d.mission === null ? MISSIONS.length : MISSIONS.findIndex((m) => m.id === d.mission)
+    s.mission = at < 0 ? 0 : at
 
-    // buildings: anything that no longer fits (or sits on ground it can't use) is refunded
-    const list: SaveEnt[] = v1
-      ? arr(d.ents).map((t) => {
-          const [k, i, j, dir, l] = arr(t)
-          return { k, i, j, d: dir, l } as SaveEnt
-        })
-      : (arr(d.ents) as SaveEnt[])
+    // buildings: anything that doesn't fit (or sits on ground it can't use) is refunded
+    const list = arr(d.ents)
     for (const raw of list) {
       const se = obj(raw)
       const k = se.k as Kind
@@ -1276,16 +1301,7 @@ export class Sim {
     s.rev++
     s.updateShielding()
 
-    // power: v2 keeps the core reserve separately; v1 had one pool, poured back into the stores in order
-    if (v1) {
-      let pool = num(d.stored, RESERVE_KJ, 0)
-      s.reserve = Math.min(RESERVE_KJ, pool)
-      pool -= s.reserve
-      for (const b of s.list('battery')) {
-        b.charge = Math.min(s.batteryKJ(b), pool)
-        pool -= b.charge
-      }
-    } else s.reserve = num(d.reserve, RESERVE_KJ, 0, RESERVE_KJ)
+    s.reserve = num(d.reserve, RESERVE_KJ, 0, RESERVE_KJ)
     s.ensureGrid()
     s.power.stored = s.reserve + s.list('battery').reduce((n, b) => n + (b.onGrid ? b.charge : 0), 0)
 
