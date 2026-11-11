@@ -37,7 +37,7 @@ import {
   ventPx,
   waterDrop,
   type Ramp,
-} from './pixel'
+} from '@/game/art/pixel'
 
 export function line(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, c: string) {
   const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1)

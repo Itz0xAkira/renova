@@ -2,10 +2,10 @@
 
 import Phaser from 'phaser'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { skyCanvas } from './art'
-import { Hud } from './Hud'
-import { MarsScene } from './MarsScene'
-import { GameStore } from './store'
+import { skyCanvas } from '@/game/art/sprites'
+import { Hud } from '@/game/ui/Hud'
+import { MarsScene } from '@/game/render/MarsScene'
+import { GameStore } from '@/game/store'
 
 export default function GameRoot() {
   const host = useRef<HTMLDivElement>(null)

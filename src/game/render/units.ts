@@ -10,9 +10,9 @@
  * cosmetic and aren't saved.
  */
 import Phaser from 'phaser'
-import { TER_OX, TER_OY } from './art'
-import { BUILDINGS, MAP } from './data'
-import { CORE_AT, type Sim } from './sim'
+import { TER_OX, TER_OY } from '@/game/art/sprites'
+import { BUILDINGS, MAP } from '@/game/core/data'
+import { CORE_AT, type Sim } from '@/game/core/sim'
 
 const world = (fi: number, fj: number) => [TER_OX + (fi - fj) * 16, TER_OY + (fi + fj) * 8 + 8] as const
 

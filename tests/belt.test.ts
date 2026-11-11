@@ -1,4 +1,4 @@
-import { Sim, CORE_AT as c } from '../src/game/sim'
+import { Sim, CORE_AT as c } from '@/game/core/sim'
 // drill → belt east → corner turning north → belt north → core
 const s = new Sim(42)
 s.stock.metal = 500

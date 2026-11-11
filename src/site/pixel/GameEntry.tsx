@@ -6,7 +6,7 @@ import { GAME_URL } from '../content'
 import { useReducedMotion } from '../lib/hooks'
 import { PixelCanvas } from './PixelCanvas'
 import { WORLD } from './scenes'
-import { HowToPlay } from '@/game/HowToPlay'
+import { HowToPlay } from '@/game/ui/HowToPlay'
 
 type Phase = 'closed' | 'cover-in' | 'reveal-in' | 'open' | 'cover-out' | 'reveal-out'
 

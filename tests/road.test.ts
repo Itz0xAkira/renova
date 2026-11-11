@@ -1,4 +1,4 @@
-import { Sim, CORE_AT as c, TRACK_WEAR, ROAD_WEAR } from '../src/game/sim'
+import { Sim, CORE_AT as c, TRACK_WEAR, ROAD_WEAR } from '@/game/core/sim'
 const s = new Sim(7)
 const i = c + 3
 const j = c + 3

@@ -1,5 +1,5 @@
-import { Sim, CORE_AT } from '../src/game/sim'
-import { SOL } from '../src/game/data'
+import { Sim, CORE_AT } from '@/game/core/sim'
+import { SOL } from '@/game/core/data'
 const s = new Sim(42)
 const c = CORE_AT
 s.stock.metal = 400; s.stock.brick = 200

@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 
 // Phaser needs `window`, so the game only ever renders in the browser.
-const GameRoot = dynamic(() => import('./GameRoot'), {
+const GameRoot = dynamic(() => import('@/game/ui/GameRoot'), {
   ssr: false,
   loading: () => (
     <div className="fixed inset-0 flex items-center justify-center bg-[#0c1220] font-pixel text-xs uppercase text-star/70">

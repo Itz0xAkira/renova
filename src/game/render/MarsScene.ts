@@ -1,11 +1,11 @@
 import Phaser from 'phaser'
-import { ANIMATED, bakeAll, bakeTier, beltKey, bKey, isBig, shKey, PORT_AX, PORT_AY, PORT_H, PORT_W, CORE_AX, CORE_AY, CORE_H, CORE_W, FRAMES, slabKey, SPR_AX, SPR_AY, SPR_H, SPR_W, TER_H, TER_OX, TER_OY, TER_W, terrainCanvas } from './art'
-import { BUILDINGS, DI, DJ, MAP, type Dir, type Kind } from './data'
-import { CORE_AT, outTile, outTileFor, type Ent } from './sim'
-import { PYLON_LINK, PYLON_REACH, SHIELD_REACH } from './data'
-import { PYLON_TOP } from './structures'
-import type { GameStore } from './store'
-import { ROVER_BAYS, Units } from './units'
+import { ANIMATED, bakeAll, bakeTier, beltKey, bKey, isBig, shKey, PORT_AX, PORT_AY, PORT_H, PORT_W, CORE_AX, CORE_AY, CORE_H, CORE_W, FRAMES, slabKey, SPR_AX, SPR_AY, SPR_H, SPR_W, TER_H, TER_OX, TER_OY, TER_W, terrainCanvas } from '@/game/art/sprites'
+import { BUILDINGS, DI, DJ, MAP, type Dir, type Kind } from '@/game/core/data'
+import { CORE_AT, outTile, outTileFor, type Ent } from '@/game/core/sim'
+import { PYLON_LINK, PYLON_REACH, SHIELD_REACH } from '@/game/core/data'
+import { PYLON_TOP } from '@/game/art/structures'
+import type { GameStore } from '@/game/store'
+import { ROVER_BAYS, Units } from '@/game/render/units'
 
 const STEP = 1 / 20
 const ZOOMS = [1, 2, 3, 4, 5, 6]

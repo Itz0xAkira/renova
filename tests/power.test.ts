@@ -1,5 +1,5 @@
-import { Sim, CORE_AT as c } from '../src/game/sim'
-import { MAP, SOLAR_KW } from '../src/game/data'
+import { Sim, CORE_AT as c } from '@/game/core/sim'
+import { MAP, SOLAR_KW } from '@/game/core/data'
 const must = (e: string | null, w: string) => {
   if (e) throw new Error(`${w}: ${e}`)
 }

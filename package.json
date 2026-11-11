@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test:sim": "tsx scripts/sim-test.ts && tsx scripts/sim-chains.ts && tsx scripts/belt-test.ts && tsx scripts/road-test.ts && tsx scripts/footprint-test.ts && tsx scripts/junction-test.ts && tsx scripts/power-test.ts"
+    "test": "tsx tests/run.ts"
   },
   "dependencies": {
     "next": "^16.4.6",

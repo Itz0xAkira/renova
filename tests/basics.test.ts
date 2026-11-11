@@ -1,4 +1,4 @@
-import { Sim, CORE_AT } from '../src/game/sim'
+import { Sim, CORE_AT } from '@/game/core/sim'
 const s = new Sim(42)
 const c = CORE_AT
 const must = (e: string | null, what: string) => { if (e) throw new Error(what + ': ' + e) }

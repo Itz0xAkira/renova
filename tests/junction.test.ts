@@ -1,5 +1,5 @@
-import { Sim, IN_BACK, IN_N, IN_P } from '../src/game/sim'
-import type { ItemId } from '../src/game/data'
+import { Sim, IN_BACK, IN_N, IN_P } from '@/game/core/sim'
+import type { ItemId } from '@/game/core/data'
 const must = (e: string | null, w: string) => {
   if (e) throw new Error(`${w}: ${e}`)
 }

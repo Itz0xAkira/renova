@@ -32,8 +32,8 @@ import {
   type Kind,
   type ResearchId,
   type StockId,
-} from './data'
-import { MISSIONS } from './missions'
+} from '@/game/core/data'
+import { MISSIONS } from '@/game/core/missions'
 
 export type Status = 'ok' | 'nopower' | 'nogrid' | 'noinput' | 'blocked' | 'unshielded' | 'badground' | 'idle'
 

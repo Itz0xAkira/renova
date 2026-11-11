@@ -1,5 +1,5 @@
-import { Sim, CORE_AT as c, outTileFor } from '../src/game/sim'
-import { BUILDINGS } from '../src/game/data'
+import { Sim, CORE_AT as c, outTileFor } from '@/game/core/sim'
+import { BUILDINGS } from '@/game/core/data'
 const must = (e: string | null, w: string) => {
   if (e) throw new Error(`${w}: ${e}`)
 }

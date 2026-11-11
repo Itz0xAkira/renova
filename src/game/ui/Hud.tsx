@@ -2,13 +2,13 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { thumbURL } from './art'
-import { BATTERY_KJ_LEVEL, BUILD_ORDER, BUILDINGS, HOTKEYS, ITEMS, MAX_LEVEL, NEEDS, RESEARCH, SOL, STATION_MAX_PLANTS, UPGRADES, type BuildingDef, type ItemId, type Kind, type StockId } from './data'
-import { HowToPlay } from './HowToPlay'
-import { iconURL, type IconName } from './icons'
-import { MISSIONS } from './missions'
-import { type Ent, type Status } from './sim'
-import type { GameStore } from './store'
+import { thumbURL } from '@/game/art/sprites'
+import { BATTERY_KJ_LEVEL, BUILD_ORDER, BUILDINGS, HOTKEYS, ITEMS, MAX_LEVEL, NEEDS, RESEARCH, SOL, STATION_MAX_PLANTS, UPGRADES, type BuildingDef, type ItemId, type Kind, type StockId } from '@/game/core/data'
+import { HowToPlay } from '@/game/ui/HowToPlay'
+import { iconURL, type IconName } from '@/game/art/icons'
+import { MISSIONS } from '@/game/core/missions'
+import { type Ent, type Status } from '@/game/core/sim'
+import type { GameStore } from '@/game/store'
 
 /* ------------------------------ design tokens ----------------------------- */
 // Gunmetal panels with a lit top edge, rust and cyan accents — the same palette as the buildings.

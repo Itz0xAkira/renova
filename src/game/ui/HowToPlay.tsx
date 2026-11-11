@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { groundURL, itemURL, thumbURL } from './art'
-import { BUILDINGS, ITEMS, NEEDS, type ItemId, type Kind } from './data'
+import { groundURL, itemURL, thumbURL } from '@/game/art/sprites'
+import { BUILDINGS, ITEMS, NEEDS, type ItemId, type Kind } from '@/game/core/data'
 
 /**
  * Illustrated, paged guide to RENOVA. Used on first launch, from the in-game

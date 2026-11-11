@@ -2,8 +2,8 @@
  * The bridge between the simulation, the Phaser scene and the React HUD.
  * Phaser mutates the sim every frame; React re-reads it when `version` bumps.
  */
-import { BUILDINGS, type Dir, type Kind } from './data'
-import { Sim, type Ent, type SaveData } from './sim'
+import { BUILDINGS, type Dir, type Kind } from '@/game/core/data'
+import { Sim, type Ent, type SaveData } from '@/game/core/sim'
 
 const SAVE_KEY = 'renova-save-v1'
 

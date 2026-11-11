@@ -3,9 +3,9 @@
  * so the game and the landing page share one art style.
  */
 import { box, C, cliffColumn, cylinder, diamond, diamondOutline, dome, drawObject, ellipseRows, hash, rect, rover, speckle, walker, type Ctx } from '@/site/pixel/engine'
-import { BUILDINGS, DI, DJ, ITEMS, MAP, type Dir, type Ground, type ItemId, type Kind } from './data'
-import { GLOW, INK, RAMP as PAL, setTier } from './pixel'
-import { battery, berm, bigGreenhouse, bigHabitat, bigKiln, bigLab, bigReactor, bigSmelter, bigWasher, coreBuilding, excavator, iceDrill, melter, moxie, pylon, rocket, solarArray, upgradeKit } from './structures'
+import { BUILDINGS, DI, DJ, ITEMS, MAP, type Dir, type Ground, type ItemId, type Kind } from '@/game/core/data'
+import { GLOW, INK, RAMP as PAL, setTier } from '@/game/art/pixel'
+import { battery, berm, bigGreenhouse, bigHabitat, bigKiln, bigLab, bigReactor, bigSmelter, bigWasher, coreBuilding, excavator, iceDrill, melter, moxie, pylon, rocket, solarArray, upgradeKit } from '@/game/art/structures'
 
 export const FRAMES = 8
 /**

@@ -1,4 +1,4 @@
-import type { Sim } from './sim'
+import type { Sim } from '@/game/core/sim'
 
 export type Mission = {
   title: string
