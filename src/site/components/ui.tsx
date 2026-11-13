@@ -2,15 +2,13 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 
+/** The RENOVA mark (the R under a ringed planet with the colony on it) and the wordmark. */
 export function Logo({ className = '' }: { className?: string }) {
   return (
-    <span className={`inline-flex items-center font-display font-semibold tracking-[0.16em] ${className}`} role="img" aria-label="RENOVA">
-      <span aria-hidden>REN</span>
-      <svg aria-hidden viewBox="0 0 24 24" className="mr-[0.16em] h-[0.8em] w-[0.8em] overflow-visible">
-        <circle cx="12" cy="12" r="9.3" fill="none" stroke="currentColor" strokeWidth="2.7" />
-        <ellipse cx="12" cy="12" rx="15" ry="4.4" fill="none" stroke="#E8753B" strokeWidth="1.7" transform="rotate(-22 12 12)" />
-      </svg>
-      <span aria-hidden>VA</span>
+    <span className={`inline-flex items-center gap-[0.55em] font-display font-semibold tracking-[0.16em] ${className}`} role="img" aria-label="RENOVA">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo.png" alt="" width={519} height={384} className="h-[2.1em] w-auto" />
+      <span aria-hidden>RENOVA</span>
     </span>
   )
 }
