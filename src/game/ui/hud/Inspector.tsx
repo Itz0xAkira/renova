@@ -5,6 +5,15 @@ import { RESERVE_KJ, type Ent } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
 import { Bar, btn, fmt, Icon, Items, panel, Recipe, Row, STATUS, TONE } from './kit'
 
+/** Where a machine's products go, in words: its outlet belts and the buildings it feeds directly. */
+function Outlets({ store, e }: { store: GameStore; e: Ent }) {
+  const outs = store.sim.outletsOf(e)
+  if (!outs.length) return <span className={TONE.warn}>Nowhere — add a belt beside it pointing away</span>
+  const belts = outs.filter((o) => o.kind !== 'building').length
+  const names = outs.filter((o) => o.kind === 'building').map((o) => BUILDINGS[store.sim.entAt(o.i, o.j)!.kind].short)
+  return <span className={TONE.good}>{[belts ? `${belts} belt${belts === 1 ? '' : 's'}` : '', ...names].filter(Boolean).join(' · ')}</span>
+}
+
 /** Details of the selected building: status, recipe, buffers, grid, level and its upgrade. */
 
 export function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb: string }) {
@@ -60,6 +69,7 @@ export function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb
         {def.mines && <Row k="Here" v={e.mineItem ? <Icon name={e.mineItem} size={18} /> : <span className={TONE.bad}>nothing to mine</span>} />}
         {def.recipe && <Row k="Input" v={<Items list={e.inBuf} />} />}
         {(def.recipe || def.mines) && <Row k="Output" v={<Items list={e.outBuf} />} />}
+        {(def.recipe || def.mines) && <Row k="Sends to" v={<Outlets store={store} e={e} />} />}
         {def.power > 0 && (
           <Row
             k="Power"
@@ -167,7 +177,7 @@ export function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb
         {def.fact}
       </p>
       <div className="flex gap-1 px-2.5 pb-2.5">
-        {def.outputs && (
+        {e.kind === 'belt' && (
           <button type="button" className={btn} onClick={() => (store.sim.rotate(e), store.bump())}>
             <Icon name="rotate" size={18} /> Rotate · R
           </button>

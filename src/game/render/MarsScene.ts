@@ -7,7 +7,7 @@
 import Phaser from 'phaser'
 import { bakeAll, bakeTier, beltKey, bKey, FRAMES, PORT_AX, PORT_AY, PORT_H, PORT_W, shKey, spriteSpec, TER_H, TER_W, terrainCanvas, type TextureSink } from '@/game/art/sprites'
 import { BUILDINGS, DI, DJ, ITEMS, MAP, type Dir, type ItemId, type Kind } from '@/game/core/data'
-import { outTile, type Ent } from '@/game/core/sim'
+import type { Ent } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
 import { setDep, setTex } from '@/game/render/display'
 import { MapInput } from '@/game/render/input'
@@ -252,8 +252,9 @@ export class MarsScene extends Phaser.Scene {
   }
 
   /**
-   * Where belts meet buildings: an output chute on the edge each machine's arrow
-   * faces, and a loader dock (with a pickup arm) on every edge a belt delivers to.
+   * Where belts meet buildings: an output chute on every edge where a belt (or junction)
+   * carries a machine's products away, and a loader dock (with a pickup arm) on every edge a
+   * belt delivers to. Belts plug into any side, so there can be several of each.
    */
   private syncPorts() {
     const sim = this.store.sim
@@ -265,11 +266,15 @@ export class MarsScene extends Phaser.Scene {
     }
     for (const e of sim.ents.values()) {
       if (!BUILDINGS[e.kind].outputs) continue
-      const [ti, tj] = outTile(e)
-      if (e.kind !== 'belt') add(e, ti - DI[e.dir], tj - DJ[e.dir], e.dir, 'out')
+      if (e.kind !== 'belt') {
+        for (const o of sim.outletsOf(e)) if (o.kind !== 'building') add(e, o.i - DI[o.dir], o.j - DJ[o.dir], o.dir, 'out')
+        continue
+      }
       // a belt delivering into a machine or the core gets a loader dock on that edge
+      const ti = e.i + DI[e.dir]
+      const tj = e.j + DJ[e.dir]
       const target = sim.entAt(ti, tj)
-      if (e.kind === 'belt' && target && target.kind !== 'belt' && (target.kind === 'core' || BUILDINGS[target.kind].recipe)) add(target, ti, tj, ((e.dir + 2) % 4) as Dir, 'in')
+      if (target && target.kind !== 'belt' && target.kind !== 'junction' && (target.kind === 'core' || BUILDINGS[target.kind].recipe)) add(target, ti, tj, ((e.dir + 2) % 4) as Dir, 'in')
     }
     if (key === this.portsKey) return
     this.portsKey = key

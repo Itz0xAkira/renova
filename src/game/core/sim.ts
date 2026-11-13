@@ -46,6 +46,7 @@ import {
   type BeltItem,
   type Ent,
   type Msg,
+  type Outlet,
   type Popup,
   type SaveData,
   type SaveEnt,
@@ -319,6 +320,7 @@ export class Sim {
       shielded: false,
       residents: 0,
       outCursor: 0,
+      outSide: 0,
       curve: null,
       inMask: 0,
       lanes: [[], [], [], []],
@@ -389,8 +391,9 @@ export class Sim {
     return total
   }
 
+  /** Turn a belt. Buildings don't turn: belts plug into any side of them. */
   rotate(e: Ent, by = 1) {
-    if (!BUILDINGS[e.kind].outputs) return
+    if (e.kind !== 'belt') return
     e.dir = ((e.dir + by + 4) % 4) as Dir
     this.rev++
   }
@@ -592,8 +595,69 @@ export class Sim {
       return !!src && this.feeds(src, e.i, e.j, depth + 1)
     }
     if (!BUILDINGS[e.kind].outputs) return false
-    const [oi, oj] = outTile(e)
-    return oi === i && oj === j
+    if (e.kind === 'belt') {
+      const [oi, oj] = outTile(e)
+      return oi === i && oj === j
+    }
+    // a machine feeds any belt beside it that points away from it
+    const d = Sim.sideOf(e, i, j)
+    const t = d === null ? null : this.entAt(i, j)
+    return !!t && t.kind === 'belt' && t.dir === d
+  }
+
+  /**
+   * Which way (i, j) lies off the edge of e's footprint: 0 east (+i), 1 south (+j), 2 west, 3 north.
+   * Null if it isn't directly beside an edge (inside, diagonal from a corner, or further away).
+   */
+  static sideOf(e: { kind: Kind; i: number; j: number }, i: number, j: number): Dir | null {
+    const { w, h } = BUILDINGS[e.kind]
+    const inI = i >= e.i && i < e.i + w
+    const inJ = j >= e.j && j < e.j + h
+    if (inJ && i === e.i + w) return 0
+    if (inI && j === e.j + h) return 1
+    if (inJ && i === e.i - 1) return 2
+    if (inI && j === e.j - 1) return 3
+    return null
+  }
+
+  /** Where each machine sends its products (rebuilt when the layout changes). */
+  private outletMap = new Map<number, Outlet[]>()
+
+  /**
+   * Everything a machine can hand its products to: every belt beside it that points away from
+   * it, every junction beside it, and every building it touches that uses something it makes
+   * (each building once). Several outlets take turns.
+   */
+  outletsOf(e: Ent): Outlet[] {
+    this.ensureBelts()
+    return this.outletMap.get(e.id) ?? []
+  }
+
+  private findOutlets(e: Ent): Outlet[] {
+    const { w, h } = BUILDINGS[e.kind]
+    const out: Outlet[] = []
+    const seen = new Set<number>()
+    const makes = BUILDINGS[e.kind].recipe ? (Object.keys(BUILDINGS[e.kind].recipe!.out) as ItemId[]) : e.mineItem ? [e.mineItem] : []
+    const look = (i: number, j: number, dir: Dir) => {
+      const n = this.entAt(i, j)
+      if (!n || n === e) return
+      if (n.kind === 'belt') {
+        if (n.dir === dir) out.push({ i, j, dir, kind: 'belt' })
+      } else if (n.kind === 'junction') out.push({ i, j, dir, kind: 'junction' })
+      else if (!seen.has(n.id) && (n.kind === 'core' || makes.some((m) => BUILDINGS[n.kind].recipe?.in[m]))) {
+        seen.add(n.id)
+        out.push({ i, j, dir, kind: 'building' })
+      }
+    }
+    for (let di = 0; di < w; di++) {
+      look(e.i + di, e.j + h, 1)
+      look(e.i + di, e.j - 1, 3)
+    }
+    for (let dj = 0; dj < h; dj++) {
+      look(e.i + w, e.j + dj, 0)
+      look(e.i - 1, e.j + dj, 2)
+    }
+    return out
   }
 
   private fedFrom(b: Ent, side: Dir) {
@@ -629,6 +693,8 @@ export class Sim {
       }
     }
     this.flow = this.flowOrder()
+    this.outletMap.clear()
+    for (const e of this.ents.values()) if (BUILDINGS[e.kind].outputs && e.kind !== 'belt') this.outletMap.set(e.id, this.findOutlets(e))
   }
 
   /** Belts and junctions in the order they move: furthest downstream first. */
@@ -772,6 +838,31 @@ export class Sim {
   private refuse(t: Ent, side: Dir) {
     t.wantAt[side] = this.tick
     return false
+  }
+
+  /**
+   * Hand one finished item to the next outlet in turn (see `outletsOf`): belts and buildings
+   * share a machine's output evenly, and if one outlet is full or doesn't want an item the
+   * next one gets the chance.
+   */
+  private emit(e: Ent) {
+    const outs = this.outletMap.get(e.id)
+    if (!outs?.length) return
+    for (let n = 0; n < outs.length; n++) {
+      const k = (e.outSide + n) % outs.length
+      const o = outs[k]
+      for (let m = 0; m < ITEM_IDS.length; m++) {
+        const idx = (e.outCursor + m) % ITEM_IDS.length
+        const item = ITEM_IDS[idx]
+        if (!(e.outBuf[item]! > 0)) continue
+        if (this.push(o.i, o.j, item, o.dir)) {
+          e.outBuf[item]!--
+          e.outCursor = idx + 1
+          e.outSide = k + 1
+          return
+        }
+      }
+    }
   }
 
   private outTotal(e: Ent) {
@@ -976,19 +1067,7 @@ export class Sim {
 
       // output: round-robin over whatever is in the output buffer; if the next tile won't take one
       // kind of item, the others still get out
-      if (def.outputs) {
-        const [oi, oj] = outTile(e)
-        for (let n = 0; n < ITEM_IDS.length; n++) {
-          const idx = (e.outCursor + n) % ITEM_IDS.length
-          const item = ITEM_IDS[idx]
-          if (!(e.outBuf[item]! > 0)) continue
-          if (this.push(oi, oj, item, e.dir)) {
-            e.outBuf[item]!--
-            e.outCursor = idx + 1
-            break
-          }
-        }
-      }
+      if (def.outputs) this.emit(e)
 
       // status (habitats are set in lifeSupport, once residents are known)
       if (e.kind === 'habitat') continue

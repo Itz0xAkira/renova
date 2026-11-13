@@ -10,6 +10,12 @@ export type Status = 'ok' | 'nopower' | 'nogrid' | 'noinput' | 'blocked' | 'unsh
  */
 export type BeltItem = { item: ItemId; pos: number; from?: Dir; v?: number }
 
+/**
+ * Somewhere a machine can hand its products: a belt beside it pointing away, a junction beside
+ * it, or a touching building that uses them. (i, j) is that tile; `dir` points away from the machine.
+ */
+export type Outlet = { i: number; j: number; dir: Dir; kind: 'belt' | 'junction' | 'building' }
+
 /** Belt input bits: fed from behind, from the +b side ((dir+1)%4), from the −b side ((dir+3)%4). */
 export const IN_BACK = 1
 export const IN_P = 2
@@ -33,6 +39,8 @@ export type Ent = {
   shielded: boolean
   residents: number
   outCursor: number
+  /** Machines (not saved): which output belt or neighbour gets the next item, so several share it in turn. */
+  outSide: number
   /** Belts only: the side a curve is fed from (a corner piece), or null if straight. */
   curve: Dir | null
   /** Belts only: which sides feed this belt (IN_BACK | IN_P | IN_N). */

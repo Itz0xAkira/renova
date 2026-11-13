@@ -1,4 +1,4 @@
-import { Sim, CORE_AT as c, CORE_CENTRE, outTileFor } from '@/game/core/sim'
+import { Sim, CORE_AT as c, CORE_CENTRE } from '@/game/core/sim'
 import { BUILDINGS, MAP } from '@/game/core/data'
 import { check, clean, must } from './helpers'
 
@@ -15,36 +15,64 @@ for (const [k, wh] of Object.entries(sizes)) check(`${BUILDINGS[k as keyof typeo
   check(!s.placeError('solar', c - 4, c + 4) && s.placeError('lab', c - 1, c + 1) === 'Tile is taken', 'neighbour placement')
 }
 
-// output comes out of the middle of the edge the arrow faces (just before the middle on even edges)
-const out = (k: keyof typeof BUILDINGS, d: 0 | 1 | 2 | 3) => String(outTileFor(k, 10, 10, d))
-check(out('smelter', 0) === '13,11' && out('smelter', 1) === '11,13' && out('smelter', 2) === '9,11' && out('smelter', 3) === '11,9', '3×3 output tiles')
-check(out('greenhouse', 0) === '14,11' && out('greenhouse', 1) === '11,13' && out('greenhouse', 2) === '9,11' && out('greenhouse', 3) === '11,9', '4×3 output tiles')
-check(out('drill', 0) === '12,10' && out('drill', 1) === '10,12' && out('drill', 2) === '9,10' && out('drill', 3) === '10,9', '2×2 output tiles')
-check(out('belt', 0) === '11,10', '1×1 output tile')
-
-// belts dock on the output tile only; any belt pointing into any edge tile feeds the machine
+// belts plug into any side: a belt beside a machine pointing away is an outlet, one pointing in feeds it,
+// one running past along the edge is neither; several outlets take turns
 {
   const s = clean()
-  must(s.place('kiln', c + 6, c + 6, 0), 'kiln') // 3×3, outputs east onto (c+9, c+7)
-  must(s.place('belt', c + 9, c + 7, 0), 'out belt')
-  must(s.place('belt', c + 9, c + 6, 0), 'beside the output')
-  must(s.place('belt', c + 7, c + 5, 1), 'into the top edge')
+  must(s.place('kiln', c + 6, c + 6, 0), 'kiln') // 3×3: tiles c+6..c+8
+  check(Sim.sideOf(s.entAt(c + 6, c + 6)!, c + 9, c + 7) === 0 && Sim.sideOf(s.entAt(c + 6, c + 6)!, c + 9, c + 9) === null, 'sideOf')
+  must(s.place('belt', c + 9, c + 7, 0), 'east, pointing away')
+  must(s.place('belt', c + 7, c + 9, 1), 'south, pointing away')
+  must(s.place('belt', c + 5, c + 7, 1), 'west, running past')
+  must(s.place('belt', c + 7, c + 5, 1), 'north, pointing in')
   s.ensureBelts()
-  check(!s.entAt(c + 9, c + 7)!.capStart, 'output belt should be fed by the kiln')
-  check(s.entAt(c + 9, c + 6)!.capStart, 'belt beside the output tile is not fed')
+  const kiln = s.entAt(c + 6, c + 6)!
+  check(!s.entAt(c + 9, c + 7)!.capStart && !s.entAt(c + 7, c + 9)!.capStart, 'belts pointing away should be fed by the kiln')
+  check(s.entAt(c + 5, c + 7)!.capStart, 'a belt running past the edge is not an outlet')
   check(!s.entAt(c + 7, c + 5)!.capEnd, 'belt into an edge tile docks')
+  check(s.outletsOf(kiln).length === 2, `kiln outlets ${s.outletsOf(kiln).length}`)
   s.entAt(c + 7, c + 5)!.items.push({ item: 'regolith', pos: 0.9 })
   s.step(0.1)
-  check(s.entAt(c + 6, c + 6)!.inBuf.regolith === 1, 'regolith should enter the kiln through its top edge')
+  check(kiln.inBuf.regolith === 1, 'regolith should enter the kiln through its top edge')
+  // both outlets share the bricks
+  kiln.outBuf.brick = 6
+  for (let n = 0; n < 40; n++) s.step(1 / 20)
+  const on = (i: number, j: number) => s.entAt(i, j)!.items.length
+  check(on(c + 9, c + 7) >= 1 && on(c + 7, c + 9) >= 1, 'bricks should leave by both outlet belts')
+}
+
+// touching buildings hand over directly, but only what the neighbour uses
+{
+  const s = clean()
+  for (let k = 0; k < 4; k++) s.ground[(c + 12 + (k >> 1)) * MAP + c + 12 + (k & 1)] = 'ice'
+  must(s.place('drill', c + 12, c + 12, 0), 'drill')
+  must(s.place('melter', c + 14, c + 12, 0), 'melter touching the drill')
+  must(s.place('kiln', c + 12, c + 14, 0), 'kiln touching the drill (doesn’t use ice)')
+  const drill = s.entAt(c + 12, c + 12)!
+  check(s.outletsOf(drill).length === 1 && s.outletsOf(drill)[0].kind === 'building', `drill outlets ${JSON.stringify(s.outletsOf(drill))}`)
+  drill.outBuf.ice = 3
+  for (let n = 0; n < 20; n++) s.step(1 / 20)
+  check((s.entAt(c + 14, c + 12)!.inBuf.ice ?? 0) + (s.entAt(c + 14, c + 12)!.crafting ? 1 : 0) >= 1, 'ice should go straight into the touching melter')
+  check(!s.entAt(c + 12, c + 14)!.inBuf.ice, 'the kiln must not get ice')
+}
+
+// only belts turn
+{
+  const s = clean()
+  must(s.place('kiln', c + 6, c + 6, 0), 'kiln')
+  const k = s.entAt(c + 6, c + 6)!
+  s.rotate(k)
+  check(k.dir === 0, 'buildings should not turn')
 }
 
 // metal chain through a 3×3 smelter on the real map: starter ore → smelter → belts → core
 const t = new Sim(42)
 t.stock.metal = 999
 t.stock.brick = 999
-must(t.place('excavator', c - 2, c + 12, 3), 'excavator') // outputs north onto (c-2, c+11), inside the smelter
-must(t.place('smelter', c - 3, c + 9, 0), 'smelter') // tiles c-3..c-1 × c+9..c+11, outputs east onto (c, c+10)
-for (let j = c + 10; j >= c + 3; j--) must(t.place('belt', c, j, 3), `belt ${j}`)
+must(t.place('excavator', c - 2, c + 12, 3), 'excavator') // touches the smelter's south edge: ore goes straight in
+must(t.place('smelter', c - 3, c + 9, 0), 'smelter') // tiles c-3..c-1 × c+9..c+11
+must(t.place('belt', c, c + 10, 0), 'out belt') // points away from the smelter's east edge
+for (let j = c + 10; j >= c + 3; j--) must(t.place('belt', c + 1, j, 3), `belt ${j}`)
 for (let n = 0; n < 20 * 60; n++) t.step(1 / 20)
 check(t.delivered.metal >= 3, `metal from 3×3 smelter: ${t.delivered.metal}`)
 // habitats house 6, and the greenhouse and washer are available from the start

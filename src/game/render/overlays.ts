@@ -1,7 +1,7 @@
 /**
  * Everything the scene draws over the world that isn't a building or a unit:
  * the cursor (hover tile, footprint outlines, glow on the hovered building,
- * build ghost and output arrow), shield range, power grid coverage and the
+ * build ghost and output arrows), shield range, power grid coverage and the
  * power cables strung between grid nodes.
  *
  * Coverage and cables change rarely, so they are drawn once into render
@@ -12,7 +12,7 @@ import Phaser from 'phaser'
 import { FRAMES, TER_H, TER_W } from '@/game/art/sprites'
 import { PYLON_TOP } from '@/game/art/structures'
 import { BUILDINGS, CORE_LINK, MAP, PYLON_LINK, PYLON_REACH, SHIELD_REACH, type Kind } from '@/game/core/data'
-import { outTileFor, type Ent } from '@/game/core/sim'
+import type { Ent } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
 import { CORE_ANTENNA } from '@/game/render/coreLayout'
 import { setDep, setTex } from '@/game/render/display'
@@ -49,7 +49,9 @@ export class Overlays {
   private hover: Phaser.GameObjects.Image
   private glow: Phaser.GameObjects.Image
   private ghost: Phaser.GameObjects.Image
-  private arrow: Phaser.GameObjects.Image
+  /** Arrows along each belt a hovered building sends its products out on (pooled). */
+  private arrows: Phaser.GameObjects.Image[] = []
+  private arrowsShown = 0
   private foot: Phaser.GameObjects.Graphics
   private range: Phaser.GameObjects.Graphics
   /** Grid coverage tiles, stamped opaque and faded as one layer so overlapping tile edges never darken. */
@@ -81,7 +83,6 @@ export class Overlays {
     this.pen = scene.make.graphics({}, false)
     this.glow = add.image(0, 0, 'b_solar_0').setBlendMode(Phaser.BlendModes.ADD).setVisible(false)
     this.ghost = add.image(0, 0, 'b_solar_0').setAlpha(0.6).setVisible(false)
-    this.arrow = add.image(0, 0, 'arrow_0').setDepth(DEPTH.overlay).setVisible(false)
   }
 
   /** A new sim: forget every cached drawing. */
@@ -161,7 +162,8 @@ export class Overlays {
     this.glow.setVisible(false)
     this.hover.setVisible(false)
     this.ghost.setVisible(false)
-    this.arrow.setVisible(false)
+    for (const a of this.arrows) a.setVisible(false)
+    this.arrowsShown = 0
     ui.hoverErr = null
 
     // the selected building keeps a steady outline
@@ -169,7 +171,7 @@ export class Overlays {
     if (sel && sel.kind !== 'belt') this.outline(sel.kind, sel.i, sel.j, 0xe8753b, 0.9)
 
     if (h && tool) {
-      // build preview: footprint outline, ghost sprite and output arrow
+      // build preview: footprint outline and ghost sprite
       const [i, j] = this.anchor(tool) ?? h
       const err = sim.placeError(tool, i, j)
       ui.hoverErr = err
@@ -189,7 +191,6 @@ export class Overlays {
         setDep(ghost, depthFor(tool, i, j) + 1)
       }
       ghost.setPosition(x, cy).setVisible(true).setAlpha(err ? 0.35 : 0.7).setTint(err ? 0xff6a5f : 0xffffff)
-      if (BUILDINGS[tool].outputs && tool !== 'belt') this.showArrow(...outTileFor(tool, i, j, ui.dir), ui.dir)
     } else if (h) {
       const e = sim.entAt(h[0], h[1])
       if (!e) {
@@ -203,7 +204,8 @@ export class Overlays {
           setTex(this.glow, s.texture.key).setOrigin(s.originX, s.originY).setPosition(s.x, s.y).setAlpha(0.16 + 0.1 * pulse).setVisible(true)
           setDep(this.glow, s.depth + 0.01)
         }
-        if (BUILDINGS[e.kind].outputs && e.kind !== 'belt') this.showArrow(...outTileFor(e.kind, e.i, e.j, e.dir), e.dir)
+        // where its products go: an arrow along every belt or junction it feeds
+        if (BUILDINGS[e.kind].outputs && e.kind !== 'belt') for (const o of sim.outletsOf(e)) if (o.kind !== 'building') this.showArrow(o.i, o.j, o.dir)
       }
     }
 
@@ -213,8 +215,14 @@ export class Overlays {
 
   private showArrow(ti: number, tj: number, dir: number) {
     const [ax, ay] = top(ti, tj)
-    setTex(this.arrow, `arrow_${dir}`).setPosition(ax, ay + 8).setVisible(true)
+    let a = this.arrows[this.arrowsShown++]
+    if (!a) {
+      a = this.scene.add.image(0, 0, `arrow_${dir}`).setDepth(DEPTH.overlay)
+      this.arrows.push(a)
+    }
+    setTex(a, `arrow_${dir}`).setPosition(ax, ay + 8).setVisible(true)
   }
+
 
   /** Shield coverage preview, measured from the whole footprint. */
   private drawRange(h: [number, number] | null, sel: Ent | null) {

@@ -46,7 +46,7 @@ export function BuildCard({ store, def }: { store: GameStore; def: BuildingDef }
       )}
       {ui.tool === def.kind && (
         <p className={`mt-1.5 ${TONE.label}`}>
-          Facing {dirs[ui.dir]} · R rotate · drag to build · right-click remove
+          {def.kind === 'belt' ? `Facing ${dirs[ui.dir]} · R rotate · drag to lay a line · right-click remove` : def.outputs ? 'Belts plug into any side: pointing away takes products out, pointing in feeds it · touching buildings hand over directly' : 'Click to build · drag to build a row · right-click remove'}
         </p>
       )}
     </div>

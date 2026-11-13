@@ -207,9 +207,12 @@ function chapters(art: Art): Chapter[] {
           <P>
             Buildings are big. Machines take <B>2×2</B> or <B>3×3</B> tiles, the greenhouse <B>4×3</B>. Belts, junctions and pylons take a single tile. Nothing can be built on <B>grey boulders</B> or in <B>craters</B>.
           </P>
-          <H>Facing</H>
+          <H>Plugging in belts</H>
           <P>
-            Machines push what they make out of one side, shown by an <B className="text-mars">orange arrow</B> and a dock on that edge. Press <K>R</K> to turn the ghost before you build (<K>Shift</K>+<K>R</K> turns the other way), or press <K>R</K> over a built machine to turn it.
+            Belts plug into <B>any side</B> of a building, and you can connect as many as you like. A belt that <B>points into</B> a building feeds it. A belt that starts beside a building and <B>points away</B> carries its products out: an output chute appears on that edge. With several output belts, the products take turns between them.
+          </P>
+          <P>
+            Buildings that <B>touch</B> hand items straight over, no belt needed, as long as the neighbour uses them: put a drill against a melter and the ice goes right in. Hover a building to see arrows on every belt its products leave by.
           </P>
           <H>Paying and refunds</H>
           <P>
@@ -231,7 +234,7 @@ function chapters(art: Art): Chapter[] {
             <B>Ice drills</B> only work on ice. <B>Excavators</B> dig ore from ore ground, or regolith from sand. A miner only needs <B>some</B> of its footprint on the right ground. On mixed ground it digs whatever covers most of it, and the inspector says what it’s mining.
           </P>
           <P>
-            Miners need <B>power</B> to run (see the Power chapter) and somewhere to put what they dig: point their arrow at a belt or straight into a machine.
+            Miners need <B>power</B> to run (see the Power chapter) and somewhere to put what they dig: a belt beside them pointing away, or a machine they touch.
           </P>
           <Tip>Your landing site always has ice and ore within reach of the core’s power. Look for the blue and dark red patches nearby.</Tip>
         </>
@@ -255,7 +258,7 @@ function chapters(art: Art): Chapter[] {
             Belts feed straight into machines from <B>any edge</B>. Anything that reaches the <B>colony core</B> goes into your stores, which is where the HUD numbers come from and what pays for buildings.
           </P>
           <Tip>Machines with two ingredients (the washer and greenhouse) are happiest with one belt per ingredient. A single mixed belt still works, just more slowly.</Tip>
-          <Tip tone="warn">If a machine’s output has nowhere to go, it stops with “Output blocked”. Check that its arrow points at a belt that leads somewhere.</Tip>
+          <Tip tone="warn">If a machine’s products have nowhere to go, it stops with “Output blocked”. Select it: the inspector’s “Sends to” line lists its output belts. A belt running <B>past</B> a building along its edge doesn’t take anything; it has to point away.</Tip>
         </>
       ),
     },
@@ -401,7 +404,7 @@ function chapters(art: Art): Chapter[] {
               Build <B>two solar panels</B> (<K>7</K>) close to the core. Everything else needs power.
             </li>
             <li>
-              Put an <B>ice drill</B> (<K>2</K>) on a blue patch and belt it into an <B>ice melter</B> (<K>4</K>), then belt the melter’s water into the core.
+              Put an <B>ice drill</B> (<K>2</K>) on a blue patch with an <B>ice melter</B> (<K>4</K>) touching it, then run a belt from beside the melter, pointing away, to the core.
             </li>
             <li>
               Add a <B>battery</B> before dark, and a <B>pylon</B> if the ice or ore is outside the core’s reach.
@@ -434,7 +437,7 @@ function chapters(art: Art): Chapter[] {
               <>
                 <K>R</K> · <K>Shift</K>+<K>R</K>
               </>,
-              'Rotate the build ghost, or the building under the cursor',
+              'Turn the belt you’re about to lay, or the belt under the cursor',
             ],
             [<K key="q">Q</K>, 'Copy the building under the cursor'],
             [<K key="u">U</K>, `Upgrade the selected building (up to level ${MAX_LEVEL})`],

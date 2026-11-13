@@ -34,7 +34,7 @@ export const MISSIONS: Mission[] = [
     id: 'melt',
     title: 'Melt it down',
     text: 'Belt ice into an ice melter, then belt its water into the colony core. Deliver 10 water.',
-    tip: 'Point the drill’s arrow at a belt. Drag to lay belts. Press R to rotate before placing.',
+    tip: 'Lay a belt beside the drill pointing away from it, or put a melter right against it. Drag to lay belts; R turns them.',
     check: (s) => s.delivered.water >= 10,
     progress: (s) => [Math.min(10, s.delivered.water), 10],
   },
