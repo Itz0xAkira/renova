@@ -3,8 +3,12 @@ import type { Dir, ItemId, Kind, ResearchId, StockId } from '@/game/core/data'
 
 export type Status = 'ok' | 'nopower' | 'nogrid' | 'noinput' | 'blocked' | 'unshielded' | 'badground' | 'idle'
 
-/** An item on a belt. `from` is the side it entered from, when it came in round a corner or merge curve. */
-export type BeltItem = { item: ItemId; pos: number; from?: Dir }
+/**
+ * An item on a belt. `from` is the side it entered from, when it came in round a corner or merge curve.
+ * `v` is how far it moved per second in the last step (not saved): the scene uses it to draw
+ * items smoothly between the sim's fixed steps.
+ */
+export type BeltItem = { item: ItemId; pos: number; from?: Dir; v?: number }
 
 /** Belt input bits: fed from behind, from the +b side ((dir+1)%4), from the −b side ((dir+3)%4). */
 export const IN_BACK = 1
@@ -48,6 +52,16 @@ export type Ent = {
   capStart: boolean
   /** Belts only: the output leads nowhere that will take items. */
   capEnd: boolean
+  /**
+   * Belts and junctions (not saved): fair merging. `wantAt[side]` is the last tick a push from
+   * that side was turned away; `lastOk[side]` the last tick one got in (for a belt fed from
+   * behind with side merges, the back's turn is counted when an item crosses the merge point).
+   * Whoever has waited longest goes next, so no input can starve another.
+   */
+  wantAt: number[]
+  lastOk: number[]
+  /** Belts and junctions (not saved): seconds with items on it but nothing moving. Over a second, it's jammed. */
+  stall: number
 }
 
 export type Tone = 'info' | 'good' | 'warn' | 'bad'

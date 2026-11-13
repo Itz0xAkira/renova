@@ -326,40 +326,17 @@ export class MapInput {
     }
   }
 
-  /**
-   * Swap the belt at (i, j) for a junction, carrying its items over onto the
-   * junction's lane in the belt's direction. Checks first that a junction can be
-   * built (counting the belt's refund), so nothing is removed when it can't.
-   * TODO(core): this belongs in the sim as one atomic action.
-   */
+  /** Swap the belt at (i, j) for a junction (one atomic sim action that keeps its items), or say why not. */
   private makeJunction(i: number, j: number) {
     const sim = this.store.sim
     const belt = sim.entAt(i, j)
     if (!belt || belt.kind !== 'belt') return
-    const name = BUILDINGS.junction.name
-    if (!sim.unlocked('junction')) {
-      sim.log(`${name}: not researched yet.`, 'warn')
-      return this.store.bump()
-    }
-    const jc = BUILDINGS.junction.cost
-    const bc = BUILDINGS.belt.cost
-    if (sim.stock.metal + (bc.metal ?? 0) < (jc.metal ?? 0) || sim.stock.brick + (bc.brick ?? 0) < (jc.brick ?? 0)) {
-      sim.log(`${name}: not enough materials.`, 'warn')
-      return this.store.bump()
-    }
-    sim.remove(i, j)
-    if (this.store.ui.selected === belt.id) this.store.ui.selected = null
-    const err = sim.place('junction', i, j, 0)
-    const now = sim.entAt(i, j)
-    if (err || !now) {
-      // put the belt back as it was
-      sim.place('belt', i, j, belt.dir)
-      const back = sim.entAt(i, j)
-      if (back && back.kind === 'belt') back.items = belt.items
-      if (err) sim.log(`${name}: ${err.toLowerCase()}.`, 'warn')
-    } else {
-      now.lanes[belt.dir] = belt.items.map((it) => ({ item: it.item, pos: it.pos }))
-      this.drag?.placed.add(now.id)
+    const err = sim.replaceWithJunction(i, j)
+    if (err) sim.log(err, 'warn')
+    else {
+      if (this.store.ui.selected === belt.id) this.store.ui.selected = null
+      const now = sim.entAt(i, j)
+      if (now) this.drag?.placed.add(now.id)
     }
     this.store.bump()
   }

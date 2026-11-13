@@ -38,6 +38,12 @@ export function CursorHint({ store }: { store: GameStore }) {
         {' '}
         · {def.w}×{def.h}
       </span>
+      {flat && e.status === 'blocked' && (
+        <span className="mt-0.5 flex items-center gap-1 text-[#F4D03F]">
+          <span className={`inline-block h-1.5 w-1.5 ${dot}`} />
+          Jammed
+        </span>
+      )}
       {!flat && e.kind !== 'shield' && (
         <span className="mt-0.5 flex items-center gap-1">
           <span className={`inline-block h-1.5 w-1.5 ${dot}`} />

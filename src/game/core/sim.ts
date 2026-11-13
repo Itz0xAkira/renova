@@ -60,7 +60,12 @@ export * from '@/game/core/world'
 /* -------------------------------- tuning -------------------------------- */
 
 /** Minimum spacing between items on a belt or junction lane (in tile lengths). */
+/** Minimum spacing between items on a belt, in tiles. */
 const GAP = 0.3
+/** Items a junction lane holds: as many as fit at GAP spacing across one tile. */
+const LANE_CAP = Math.floor(1 / GAP) + 1
+/** Seconds a belt can sit full and still before it counts as jammed. */
+const JAM_AFTER = 1
 const BELT_SPEED = 1.5
 /** Items a machine holds in its output before it stops working. */
 const OUT_CAP = 6
@@ -324,6 +329,9 @@ export class Sim {
       charge: 0,
       capStart: true,
       capEnd: true,
+      wantAt: [-9, -9, -9, -9],
+      lastOk: [-9, -9, -9, -9],
+      stall: 0,
     }
     this.ents.set(e.id, e)
     for (let dj = 0; dj < def.h; dj++) for (let di = 0; di < def.w; di++) this.occ[(j + dj) * MAP + i + di] = e.id
@@ -353,6 +361,10 @@ export class Sim {
     const back = this.refundFor(e)
     this.stock.metal += back.metal
     this.stock.brick += back.brick
+    // nothing is lost: whatever it was carrying or holding goes back to the core's stores
+    for (const it of e.items) this.stock[it.item]++
+    for (const lane of e.lanes) for (const it of lane) this.stock[it.item]++
+    for (const buf of [e.inBuf, e.outBuf]) for (const k in buf) this.stock[k as ItemId] += buf[k as ItemId] ?? 0
     for (let dj = 0; dj < def.h; dj++) for (let di = 0; di < def.w; di++) this.occ[(e.j + dj) * MAP + e.i + di] = 0
     this.ents.delete(e.id)
     this.rev++
@@ -616,6 +628,51 @@ export class Sim {
         if (!still) delete it.from
       }
     }
+    this.flow = this.flowOrder()
+  }
+
+  /** Belts and junctions in the order they move: furthest downstream first. */
+  private flow: Ent[] = []
+
+  /**
+   * Order belts and junctions so each one moves before whatever feeds it. A full line then
+   * advances as one, without a gap opening at every tile edge, whatever order the tiles were
+   * built in. Loops have no "furthest" tile; they're cut at an arbitrary point.
+   */
+  private flowOrder(): Ent[] {
+    const nodes = [...this.list('belt'), ...this.list('junction')]
+    const next = (e: Ent): Ent[] => {
+      const out: Ent[] = []
+      const dirs = e.kind === 'belt' ? [e.dir] : [0, 1, 2, 3]
+      for (const d of dirs) {
+        const n = this.entAt(e.i + DI[d], e.j + DJ[d])
+        if (n && (n.kind === 'belt' || n.kind === 'junction')) out.push(n)
+      }
+      return out
+    }
+    // iterative depth-first search; a node is emitted after everything downstream of it
+    const done = new Set<number>()
+    const order: Ent[] = []
+    for (const root of nodes) {
+      if (done.has(root.id)) continue
+      const stack: [Ent, Ent[], number][] = [[root, next(root), 0]]
+      done.add(root.id)
+      while (stack.length) {
+        const top = stack[stack.length - 1]
+        const [e, kids] = top
+        if (top[2] < kids.length) {
+          const k = kids[top[2]++]
+          if (!done.has(k.id)) {
+            done.add(k.id)
+            stack.push([k, next(k), 0])
+          }
+        } else {
+          order.push(e)
+          stack.pop()
+        }
+      }
+    }
+    return order
   }
 
   /* ------------------------------ machines ------------------------------ */
@@ -657,33 +714,64 @@ export class Sim {
     } else e.inBuf[item] = (e.inBuf[item] ?? 0) + 1
   }
 
-  /** Hand an item travelling in `dir` to whatever sits on tile (i, j). */
-  private push(i: number, j: number, item: ItemId, dir: Dir): boolean {
+  /** Sim steps taken: the clock for fair merging. */
+  private tick = 0
+
+  /** Has another input of `t` been waiting longer than the one on `side`? Then `side` gives way. */
+  private mustYield(t: Ent, side: Dir) {
+    for (let d = 0; d < 4; d++) if (d !== side && t.wantAt[d] >= this.tick - 1 && t.lastOk[d] < t.lastOk[side]) return true
+    return false
+  }
+
+  /**
+   * Hand an item travelling in `dir` to whatever sits on tile (i, j). `over` is how far past the
+   * tile edge it got this step; it carries on that far onto the next belt (as room allows), so
+   * spacing isn't lost at every tile edge. Inputs that are turned away are remembered, so a busy
+   * line has to leave a gap for a waiting side feed (see `mustYield`).
+   */
+  private push(i: number, j: number, item: ItemId, dir: Dir, over = 0): boolean {
     const t = this.entAt(i, j)
     if (!t) return false
+    const side = ((dir + 2) % 4) as Dir // the side of t the item comes in from
     if (t.kind === 'belt') {
-      if (t.dir === (dir + 2) % 4) return false
+      if (t.dir === side) return false // head-on: belts pointing at each other
       // Straight in → start of the belt. From a side with nothing feeding the back (a corner or a Y):
       // start of that side's curve. From a side into a fed belt: merge in at the middle.
-      const side = t.dir !== dir
-      const curved = side && !(t.inMask & IN_BACK)
-      const p = !side || curved ? 0 : 0.5
-      for (const it of t.items) if (Math.abs(it.pos - p) < GAP) return false
+      const fromSide = t.dir !== dir
+      const curved = fromSide && !(t.inMask & IN_BACK)
+      const p = !fromSide || curved ? 0 : 0.5
+      // room: the nearest item ahead of the entry point, and anything just behind a mid-belt merge
+      let ahead = Infinity
+      for (const it of t.items) {
+        if (it.pos >= p) ahead = Math.min(ahead, it.pos)
+        else if (p - it.pos < GAP) return this.refuse(t, side)
+      }
+      const at = p + Math.max(0, Math.min(over, ahead - GAP - p))
+      // the main line entering at the back never competes with a mid-belt merge, so it never yields here
+      if (ahead - at < GAP - 1e-9 || (fromSide && this.mustYield(t, side))) return this.refuse(t, side)
       let k = 0
-      while (k < t.items.length && t.items[k].pos > p) k++
-      t.items.splice(k, 0, curved ? { item, pos: p, from: ((dir + 2) % 4) as Dir } : { item, pos: p })
+      while (k < t.items.length && t.items[k].pos > at) k++
+      t.items.splice(k, 0, curved ? { item, pos: at, from: side } : { item, pos: at })
+      t.lastOk[side] = this.tick
       return true
     }
     if (t.kind === 'junction') {
       // crossing: each travel direction has its own lane, so lines pass through without mixing
       const lane = t.lanes[dir]
-      if (lane.length >= 3 || lane.some((it) => it.pos < GAP)) return false
-      lane.push({ item, pos: 0 })
+      const tail = lane.length ? lane[lane.length - 1].pos : Infinity
+      const at = Math.max(0, Math.min(over, tail - GAP))
+      if (lane.length >= LANE_CAP || tail - at < GAP - 1e-9) return false
+      lane.push({ item, pos: at })
       return true
     }
     if (!this.accepts(t, item)) return false
     this.deliver(t, item)
     return true
+  }
+
+  private refuse(t: Ent, side: Dir) {
+    t.wantAt[side] = this.tick
+    return false
   }
 
   private outTotal(e: Ent) {
@@ -748,6 +836,7 @@ export class Sim {
     this.ensureBelts()
     this.ensureGrid()
     this.time += dt
+    this.tick++
     this.stepPower(dt)
     this.stepMachines(dt)
     this.stepBelts(dt)
@@ -885,16 +974,19 @@ export class Sim {
         this.rp += 0.12 * dt * sat
       }
 
-      // output: round-robin over whatever is in the output buffer
+      // output: round-robin over whatever is in the output buffer; if the next tile won't take one
+      // kind of item, the others still get out
       if (def.outputs) {
+        const [oi, oj] = outTile(e)
         for (let n = 0; n < ITEM_IDS.length; n++) {
           const idx = (e.outCursor + n) % ITEM_IDS.length
           const item = ITEM_IDS[idx]
           if (!(e.outBuf[item]! > 0)) continue
-          e.outCursor = idx + 1
-          const [oi, oj] = outTile(e)
-          if (this.push(oi, oj, item, e.dir)) e.outBuf[item]!--
-          break
+          if (this.push(oi, oj, item, e.dir)) {
+            e.outBuf[item]!--
+            e.outCursor = idx + 1
+            break
+          }
         }
       }
 
@@ -912,29 +1004,131 @@ export class Sim {
     this.stock.o2 += o2
   }
 
+  /**
+   * Move everything on belts and through junctions, furthest downstream first (see `flowOrder`).
+   * Items keep at least GAP apart; the head item hands over to the next tile, carrying any
+   * overshoot. Where a side feed merges into the middle of a fed belt, the main line holds back
+   * at the merge point while the side waits its turn, so the two zip together evenly.
+   */
   private stepBelts(dt: number) {
     const v = BELT_SPEED * (this.done.has('maglev') ? 1.75 : 1) * dt
-    const advance = (its: BeltItem[]) => {
+    // Move one lane of items; true if anything moved. `hold` stops items that haven't reached it
+    // yet (the merge hold). `crossed` is set when an item passes the middle of the tile.
+    let crossed = false
+    const move = (its: BeltItem[], hold: number, end: number) => {
+      let moved = false
       for (let k = 0; k < its.length; k++) {
-        const limit = k === 0 ? 1 : its[k - 1].pos - GAP
-        its[k].pos = Math.max(its[k].pos, Math.min(its[k].pos + v, limit))
+        const it = its[k]
+        let limit = k === 0 ? end : its[k - 1].pos - GAP
+        if (it.pos <= hold) limit = Math.min(limit, hold)
+        let to = Math.max(it.pos, Math.min(it.pos + v, limit))
+        // snap away float dust, so an item that has really reached the end hands over this step
+        if (to > 1 - 1e-9) to = 1
+        it.v = (to - it.pos) / dt
+        if (to > it.pos + 1e-9) moved = true
+        if (it.pos < 0.5 && to >= 0.5) crossed = true
+        it.pos = to
+      }
+      return moved
+    }
+    /** How far past the tile edge an item that started this step at `from` would have got. */
+    const carry = (from: number) => Math.min(v, Math.max(0, v - (1 - from)))
+    /**
+     * How far the front item may go: to the tile edge, unless the next tile's entry is still
+     * occupied, in which case it queues GAP behind that item, so spacing holds across the edge.
+     */
+    const end = (i: number, j: number, dir: Dir, head: number) => {
+      const n = this.entAt(i + DI[dir], j + DJ[dir])
+      let tail = Infinity
+      if (n?.kind === 'belt') {
+        if (n.dir === (dir + 2) % 4) return 1
+        // only an entry at the start of the next belt sits right at this edge; a mid-belt merge doesn't
+        if (n.dir !== dir && n.inMask & IN_BACK) return 1
+        for (const it of n.items) tail = Math.min(tail, it.pos)
+        const lim = Math.min(1, 1 + tail - GAP)
+        // queued for a side entry (a corner or Y): count as waiting, so merges stay fair
+        if (n.dir !== dir && head + v >= lim) n.wantAt[(dir + 2) % 4] = this.tick
+        return lim
+      } else if (n?.kind === 'junction') {
+        const lane = n.lanes[dir]
+        if (lane.length) tail = lane[lane.length - 1].pos
+      } else return 1
+      return Math.min(1, 1 + tail - GAP)
+    }
+    for (const e of this.flow) {
+      if (e.kind === 'belt') {
+        const its = e.items
+        if (!its.length) {
+          e.stall = 0
+          e.status = 'ok'
+          continue
+        }
+        const back = ((e.dir + 2) % 4) as Dir
+        const merges = e.inMask & IN_BACK && e.inMask & (IN_P | IN_N)
+        // a side feed waiting to merge mid-belt, and it's its turn: keep the merge window clear
+        const hold = merges && this.mustYield(e, back) ? 0.5 - GAP : Infinity
+        const headFrom = its[0].pos
+        crossed = false
+        let moved = move(its, hold, end(e.i, e.j, e.dir, its[0].pos))
+        // the back's turn is used up when one of its items crosses the merge point
+        if (merges && crossed) e.lastOk[back] = this.tick
+        if (its[0].pos >= 1 && this.push(e.i + DI[e.dir], e.j + DJ[e.dir], its[0].item, e.dir, carry(headFrom))) {
+          its.shift()
+          moved = true
+        }
+        e.stall = moved ? 0 : e.stall + dt
+        e.status = e.stall > JAM_AFTER ? 'blocked' : 'ok'
+      } else {
+        let any = false
+        let moved = false
+        for (let d = 0; d < 4; d++) {
+          const its = e.lanes[d]
+          if (!its.length) continue
+          any = true
+          const headFrom = its[0].pos
+          if (move(its, Infinity, end(e.i, e.j, d as Dir, its[0].pos))) moved = true
+          if (its[0].pos >= 1 && this.push(e.i + DI[d], e.j + DJ[d], its[0].item, d as Dir, carry(headFrom))) {
+            its.shift()
+            moved = true
+          }
+        }
+        e.stall = !any || moved ? 0 : e.stall + dt
+        e.status = e.stall > JAM_AFTER ? 'blocked' : 'ok'
       }
     }
-    for (const e of this.list('belt')) {
-      const its = e.items
-      if (!its.length) continue
-      advance(its)
-      if (its[0].pos >= 1 && this.push(e.i + DI[e.dir], e.j + DJ[e.dir], its[0].item, e.dir)) its.shift()
+  }
+
+  /**
+   * Swap the belt at (i, j) for a junction in one step, carrying its items onto the junction's
+   * lane in the belt's direction (any that don't fit go to the core's stores). Nothing changes
+   * if it can't be done. Returns why not, or null.
+   */
+  replaceWithJunction(i: number, j: number): string | null {
+    const belt = this.entAt(i, j)
+    if (!belt || belt.kind !== 'belt') return 'There’s no belt here.'
+    if (!this.unlocked('junction')) return `${BUILDINGS.junction.name}s aren’t available yet.`
+    const jc = BUILDINGS.junction.cost
+    const bc = BUILDINGS.belt.cost
+    if (this.stock.metal + (bc.metal ?? 0) < (jc.metal ?? 0) || this.stock.brick + (bc.brick ?? 0) < (jc.brick ?? 0)) return `Not enough materials for a ${BUILDINGS.junction.name.toLowerCase()}.`
+    const items = belt.items
+    belt.items = [] // carried over below, not refunded
+    this.remove(i, j)
+    const err = this.place('junction', i, j, 0)
+    const jn = err ? null : this.entAt(i, j)
+    if (!jn) {
+      // put the belt back exactly as it was
+      this.place('belt', i, j, belt.dir)
+      const back = this.entAt(i, j)
+      if (back) back.items = items
+      return err ?? 'Couldn’t build a junction here.'
     }
-    // junction lanes
-    for (const e of this.list('junction')) {
-      for (let d = 0; d < 4; d++) {
-        const its = e.lanes[d]
-        if (!its.length) continue
-        advance(its)
-        if (its[0].pos >= 1 && this.push(e.i + DI[d], e.j + DJ[d], its[0].item, d as Dir)) its.shift()
-      }
+    // belt items are front first, as lanes are; keep each one that fits at proper spacing
+    const lane = jn.lanes[belt.dir]
+    for (const it of items) {
+      if (lane.length < LANE_CAP && (lane.length === 0 || lane[lane.length - 1].pos - it.pos >= GAP - 1e-9)) lane.push({ item: it.item, pos: it.pos })
+      else this.stock[it.item]++
     }
+    return null
   }
 
   private stepResearch() {

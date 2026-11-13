@@ -359,8 +359,10 @@ export class MarsScene extends Phaser.Scene {
     for (const e of sim.ents.values()) {
       const s = this.sprites.get(e.id)
       if (!s) continue
-      setTex(s, this.texFor(e, e.kind === 'belt' || e.kind === 'junction' ? beltF : f))
-      const st = e.status
+      const flat = e.kind === 'belt' || e.kind === 'junction'
+      // a jammed belt stops running, so a backed-up line reads at a glance
+      setTex(s, this.texFor(e, flat ? (e.status === 'blocked' ? 0 : beltF) : f))
+      const st = flat && !this.jamSource(e) ? 'ok' : e.status
       let icon = this.icons.get(e.id)
       if (ICON_STATUS.has(st)) {
         if (!icon) {
@@ -377,9 +379,26 @@ export class MarsScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Is this jammed belt or junction where the jam starts? Only that one gets the warning icon,
+   * not every tile of the line backed up behind it.
+   */
+  private jamSource(e: Ent) {
+    if (e.status !== 'blocked') return false
+    const sim = this.store.sim
+    const exits = e.kind === 'belt' ? (e.items[0]?.pos ?? 0) >= 1 ? [e.dir] : [] : [0, 1, 2, 3].filter((d) => (e.lanes[d][0]?.pos ?? 0) >= 1)
+    return exits.some((d) => {
+      const n = sim.entAt(e.i + DI[d], e.j + DJ[d])
+      return !n || (n.kind !== 'belt' && n.kind !== 'junction') || n.status !== 'blocked'
+    })
+  }
+
   private drawItems() {
     const sim = this.store.sim
     const items = this.items
+    // draw items where they'll be between fixed sim steps, so they glide instead of ticking along
+    const lead = Math.min(this.acc, STEP)
+    const at = (it: { pos: number; v?: number }) => Math.min(1, it.pos + (it.v ?? 0) * lead)
     let n = 0
     const put = (key: string, px: number, py: number, depth: number) => {
       let img = items[n++]
@@ -401,7 +420,7 @@ export class MarsScene extends Phaser.Scene {
           const [ux, uy] = DIR_VEC[d]
           const sgn = d === 0 || d === 1 ? 1 : -1
           for (const it of e.lanes[d]) {
-            const o = it.pos - 0.5
+            const o = at(it) - 0.5
             put(ITEM_KEY[it.item], cx + ux * o, cy + uy * o - 2, itemDepth(row, o * sgn))
           }
         }
@@ -410,13 +429,14 @@ export class MarsScene extends Phaser.Scene {
       const [ux, uy] = DIR_VEC[e.dir]
       const sgn = e.dir === 0 || e.dir === 1 ? 1 : -1
       for (const it of e.items) {
-        const o = it.pos - 0.5
+        const pos = at(it)
+        const o = pos - 0.5
         let px = cx + ux * o
         let py = cy + uy * o
         // items that came in round a corner or a Y follow a quarter circle from their side
         if (it.from !== undefined) {
           const [sx, sy] = DIR_VEC[it.from]
-          const th = (it.pos * Math.PI) / 2
+          const th = (pos * Math.PI) / 2
           const c = Math.cos(th)
           const s = Math.sin(th)
           px = cx + 0.5 * ux + 0.5 * sx - 0.5 * ux * c - 0.5 * sx * s

@@ -105,6 +105,20 @@ export function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb
         {e.kind === 'solar' && e.level === MAX_LEVEL && (
           <Row k="Planted" v={`${e.planted} / ${STATION_MAX_PLANTS} panels · next in ${Math.max(0, Math.ceil(e.plantIn))}s`} />
         )}
+        {(e.kind === 'belt' || e.kind === 'junction') && (
+          <Row
+            k="Flow"
+            v={
+              e.status === 'blocked' ? (
+                <span className={TONE.warn}>Jammed — the line ahead isn’t taking items</span>
+              ) : (e.kind === 'belt' ? e.items.length : e.lanes.some((l) => l.length)) ? (
+                <span className={TONE.good}>Moving</span>
+              ) : (
+                <span className={TONE.label}>Empty</span>
+              )
+            }
+          />
+        )}
         {e.kind === 'belt' && (
           <Row
             k="Carrying"
