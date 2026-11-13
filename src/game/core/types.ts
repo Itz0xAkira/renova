@@ -1,5 +1,6 @@
 /** Shared simulation types: entities, messages and the save format. */
 import type { Dir, ItemId, Kind, ResearchId, StockId } from '@/game/core/data'
+import type { FlareRecord } from '@/game/core/nasa'
 
 export type Status = 'ok' | 'nopower' | 'nogrid' | 'noinput' | 'blocked' | 'unshielded' | 'badground' | 'idle'
 
@@ -74,7 +75,7 @@ export type Ent = {
 
 export type Tone = 'info' | 'good' | 'warn' | 'bad'
 export type Msg = { id: number; text: string; tone: Tone; t: number }
-export type Popup = { kind: 'research' | 'win' | 'lose' | 'intro'; title: string; body: string; field?: string }
+export type Popup = { kind: 'research' | 'win' | 'lose' | 'intro' | 'science'; title: string; body: string; field?: string; link?: string }
 /**
  * What the crew is short of. `housing`: more colonists than powered beds — the
  * extra crew bunk in the core, a gentle health drain until habitats are built.
@@ -145,7 +146,8 @@ export type SaveData = {
   ents: SaveEnt[]
   ev: {
     storm: null | { start: number; end: number }
-    flare: null | { start: number; end: number }
+    /** A solar flare: `rec` is the real DONKI flare it replays (and `live` if it came from the live feed). */
+    flare: null | { start: number; end: number; rec?: FlareRecord; live?: boolean }
     nextStorm: number
     nextFlare: number
     nextShip: number

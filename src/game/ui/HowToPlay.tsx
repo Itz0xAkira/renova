@@ -25,6 +25,7 @@ import {
   type Kind,
 } from '@/game/core/data'
 import { MISSIONS } from '@/game/core/missions'
+import { MARS_RADIATION, OSDR_STUDIES, SOURCES } from '@/game/core/nasa'
 
 /**
  * The illustrated field manual for RENOVA. Used on first launch, from the HUD
@@ -140,11 +141,97 @@ const cost = (k: Kind) => {
   return [c.metal ? `${c.metal} metal` : '', c.brick ? `${c.brick} bricks` : ''].filter(Boolean).join(' + ') || 'free'
 }
 
+/** The Mars Trek Viking colour map with the landing site and the rovers whose data we use. */
+function MarsMap() {
+  // equirectangular: x = (lon + 180) / 360, y = (90 − lat) / 180
+  const pins: { name: string; lat: number; lon: number; tone: string }[] = [
+    { name: 'Colony 001 (Arcadia Planitia)', lat: 47, lon: -176, tone: '#e8753b' },
+    { name: 'Curiosity (Gale Crater)', lat: -5.4, lon: 137.8, tone: '#65C9E8' },
+    { name: 'Perseverance + MOXIE (Jezero)', lat: 18.4, lon: 77.5, tone: '#A8B87A' },
+  ]
+  return (
+    <figure className="border-2 border-star/10">
+      <div className="relative">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/mars-trek-viking.jpg" alt="Colour map of Mars from NASA Mars Trek" width={1024} height={512} className="block h-auto w-full" />
+        {pins.map((p) => (
+          <span key={p.name} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${((p.lon + 180) / 360) * 100}%`, top: `${((90 - p.lat) / 180) * 100}%` }}>
+            <span className="block h-3 w-3 rounded-full border-2 border-white" style={{ background: p.tone }} />
+          </span>
+        ))}
+      </div>
+      <figcaption className="flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 font-sans text-[12px] normal-case text-star/80">
+        {pins.map((p) => (
+          <span key={p.name} className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: p.tone }} /> {p.name}
+          </span>
+        ))}
+        <span className="text-star/50">Map: NASA Mars Trek, Viking MDIM 2.1 colour mosaic (archived)</span>
+      </figcaption>
+    </figure>
+  )
+}
+
+/** Curiosity's daily radiation dose on Mars around the May 2024 solar storm (RadLab, archived). */
+function DoseChart() {
+  const data = MARS_RADIATION.may2024
+  const max = Math.max(...data.map(([, v]) => v))
+  const W = 540
+  const H = 150
+  const bw = W / data.length
+  return (
+    <figure className="border-2 border-star/10 p-3">
+      <svg viewBox={`0 0 ${W} ${H + 18}`} className="w-full" role="img" aria-label="Bar chart: Curiosity measured about 90 to 130 micrograys a day in May 2024, then 1,664 on 20 May">
+        {data.map(([d, v], k) => {
+          const h = Math.max(2, (v / max) * H)
+          const storm = d === MARS_RADIATION.stormDay.date
+          return (
+            <g key={d}>
+              <rect x={k * bw + 2} y={H - h} width={bw - 4} height={h} fill={storm ? '#ff7a6e' : '#65C9E8'} />
+              {(storm || k % 4 === 0) && (
+                <text x={k * bw + bw / 2} y={H + 13} fill="#f4f0e8" fillOpacity={0.6} fontSize={10} textAnchor="middle">
+                  {Number(d.slice(8))} May
+                </text>
+              )}
+              {storm && (
+                <text x={k * bw + bw / 2 - 6} y={14} fill="#ff7a6e" fontSize={11} textAnchor="end">
+                  {v.toLocaleString('en')} μGy in one day
+                </text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+      <figcaption className="mt-1 font-sans text-[12px] normal-case text-star/60">Radiation dose per day measured by Curiosity on Mars, May 2024. Source: NASA OSDR RadLab, MSL-RAD (archived).</figcaption>
+    </figure>
+  )
+}
+
+/** Science words, explained for ages 7–12. */
+const GLOSSARY: [string, string][] = [
+  ['Sol', 'A day on Mars. It lasts 24 hours and 39 minutes, a little longer than a day on Earth. In the game, one sol goes by in about 2 minutes.'],
+  ['Regolith', 'The dusty, rocky ground that covers Mars. It looks like soil but has nothing living in it.'],
+  ['Perchlorate', 'A salt in Martian regolith that is poisonous to people. It has to be washed out before plants can grow in it.'],
+  ['Hematite', 'A kind of iron ore. Rusty iron is part of why Mars looks red. Smelting it gives the colony metal.'],
+  ['Atmosphere', 'The air around a planet. Mars has very thin air, less than 1% as thick as Earth’s, and it is mostly carbon dioxide (CO₂), which people can’t breathe.'],
+  ['MOXIE', 'A NASA experiment on the Perseverance rover that made oxygen out of Mars air. The MOXIE plant in the game does the same job.'],
+  ['Radiation', 'Invisible energy and tiny fast particles from the Sun and deep space. Too much can damage living cells. Earth’s thick air and magnetic field protect us; Mars has neither.'],
+  ['Radiation dose', 'How much radiation a body soaks up. It is measured in grays; a microgray (μGy) is one millionth of a gray. On Mars, Curiosity measures about 190 μGy a day.'],
+  ['Shielding', 'Putting something thick, like a pile of regolith, between people and radiation, so less of it gets through.'],
+  ['Solar flare', 'A sudden, giant flash of energy on the Sun. Flares are graded A, B, C, M and X; each letter is ten times stronger than the one before, so X flares are the strongest.'],
+  ['Solar storm', 'When the Sun flings out clouds of fast particles. If they reach Mars, the radiation goes up for hours or days.'],
+  ['Microgravity', 'The floating feeling astronauts have in orbit. Without weight to carry, muscles and bones get weaker, so astronauts exercise every day. Mars has gravity, but only 38% of Earth’s.'],
+  ['Power and energy', 'Power (kilowatts, kW) is how fast electricity is being made or used right now. Energy (kilojoules, kJ) is how much is stored up, like water in a tank. Batteries store energy.'],
+  ['Dust storm', 'Strong winds lift dust high into the air. It blocks sunlight, so solar panels make much less power.'],
+  ['Communication delay', 'Radio messages travel at the speed of light, but Mars is so far away that a message takes between about 3 and 22 minutes to arrive, depending on where the planets are. The crew can’t wait for Earth to help in an emergency.'],
+  ['Mission planner', 'The people on Earth who decide what a mission does, what it carries and how much risk is OK. In RENOVA, that’s you.'],
+]
+
 /* ---------------------------------- chapters ---------------------------------- */
 
 type Chapter = { title: string; kicker: string; body: ReactNode }
 
-function chapters(art: Art): Chapter[] {
+function chapters(art: Art, sun: string): Chapter[] {
   const machines: Kind[] = ['melter', 'smelter', 'kiln', 'washer', 'greenhouse']
   const coreBeds = BUILDINGS.core.housing ?? 0
   return [
@@ -160,17 +247,46 @@ function chapters(art: Art): Chapter[] {
             <Sprite src={art.kinds.solar} label="Solar" size="lg" />
           </div>
           <P>
-            Your lander has touched down with <B>4 crew</B>, a few days of food, water and air, and a core full of building stock. Earth is 225 million km away, so nothing else is coming for a long time. You have to build a factory that turns Mars itself (ice, rock and sunlight) into everything the colony needs.
+            You are the <B>mission planner</B> for Colony 001, the first base on Mars. Your lander has just touched down with <B>4 crew</B>, a few days of food, water and air, and some building materials. Earth is so far away (about 225 million km on average) that nothing else is coming for a long time. To survive, the crew has to make everything from Mars itself: ice, rock, thin air and sunlight. Space agencies call this <B>living off the land</B>.
           </P>
+          <H>Every choice costs something</H>
+          <P>Real mission planners never get a free choice, and neither do you. For example:</P>
+          <Table
+            head={['If you…', '…you get', '…but it costs']}
+            rows={[
+              ['Build a factory', 'More metal and bricks', 'Power, which life support may need at night'],
+              ['Build regolith shields', 'Crew safe from solar flares', 'Bricks you could have spent on a greenhouse'],
+              ['Grow food in a greenhouse', 'Food for the crew', 'Water, which the crew also has to drink'],
+              ['Do research in a lab', 'Machines that work faster', 'Power and metal now, for a reward later'],
+              ['Spread out with pylons', 'More room and more resources', 'Metal for every pylon, and longer belts'],
+            ]}
+          />
           <H>How you win</H>
           <P>
-            Work through the <B>mission log</B> at the top left. Each mission teaches one part of the colony. Finish all <B>{MISSIONS.length} missions</B>, the last of which is growing to <B>20 colonists</B> with nothing running short, and Colony 001 is self-sufficient.
+            Follow the <B>mission log</B> at the top left. Each mission teaches one part of the colony. Finish all <B>{MISSIONS.length} missions</B>; the last one is to grow to <B>20 colonists</B> with nothing running short. Then Colony 001 can look after itself.
           </P>
           <H>How you lose</H>
           <P>
-            If food, water, oxygen, power or housing runs short, <B>colony health</B> falls. At <B>0%</B> the crew evacuate and the mission fails. Health recovers on its own once every shortage is fixed.
+            If food, water, oxygen, power, beds or radiation protection run short, <B>colony health</B> goes down. At <B>0%</B> the crew have to leave and the mission fails. Health comes back on its own once every problem is fixed, so you can learn from mistakes.
           </P>
-          <Tip>The game pauses whenever this guide or a panel is open. Press <K>H</K> any time to come back here.</Tip>
+          <H>Real science, real NASA data</H>
+          <P>
+            RENOVA was made for the <B>NASA Space Apps Challenge 2026</B>, for the challenge “Build a Junior Astronaut Mission Trainer”: a game that lets young players make the same kinds of decisions as real mission planners. So the science is real. Every <B>solar flare</B> in the game is a flare NASA recorded. The radiation numbers come from the <B>Curiosity rover</B> on Mars. The plant and health facts come from real NASA experiments. The chapter <B>Real NASA data</B> shows where each one comes from.
+          </P>
+          <Tip>New words like <B>sol</B>, <B>regolith</B> and <B>radiation dose</B> are explained in the next chapter, <B>Science words</B>. The game pauses whenever this guide is open. Press <K>H</K> any time to come back.</Tip>
+        </>
+      ),
+    },
+    {
+      title: 'Science words',
+      kicker: 'What the words mean',
+      body: (
+        <>
+          <P>Scientists use some special words for life on Mars. Here’s what they mean, in plain language.</P>
+          <Table
+            head={['Word', 'What it means']}
+            rows={GLOSSARY.map(([w, m]) => [<b key={w} className="text-mars">{w}</b>, m])}
+          />
         </>
       ),
     },
@@ -282,6 +398,9 @@ function chapters(art: Art): Chapter[] {
           <P>
             <B>Metal</B> and <B>bricks</B> pay for new buildings, so a smelter and a kiln feeding the core are your first real economy. Water, food and oxygen keep the crew alive.
           </P>
+          <P>
+            Farming in space is real. In NASA experiment <B>{OSDR_STUDIES.peppers.id}</B>, astronauts grew chile peppers on the space station for 137 days and picked 26. The Canadian Space Agency’s <B>Tomatosphere</B> project lets classes grow tomato seeds that have been exposed to space conditions.
+          </P>
         </>
       ),
     },
@@ -309,7 +428,11 @@ function chapters(art: Art): Chapter[] {
           </P>
           <H>Radiation</H>
           <P>
-            Mars has no magnetic field. A habitat needs a <B>regolith shield</B> within <B>{SHIELD_REACH[0]} tiles</B> of it ({SHIELD_REACH[1]} and {SHIELD_REACH[2]} when the shield is upgraded), or its crew soak up radiation. Crew move into shielded habitats first.
+            Mars has no magnetic field and very thin air, so radiation from the Sun and deep space reaches the ground. NASA’s Curiosity rover measures about <B>{MARS_RADIATION.averagePerDay} micrograys a day</B> there, and much more during solar storms. A habitat needs a <B>regolith shield</B> within <B>{SHIELD_REACH[0]} tiles</B> of it ({SHIELD_REACH[1]} and {SHIELD_REACH[2]} when the shield is upgraded), or its crew soak up radiation. Crew move into shielded habitats first.
+          </P>
+          <H>Staying strong</H>
+          <P>
+            In NASA experiment <B>{OSDR_STUDIES.muscle.id}</B>, mice on the space station lost muscle and bone in just 33 days of floating. Mars has some gravity (38% of Earth’s), but crews still have to exercise and eat well, which is why food and beds matter as much as air.
           </P>
           <H>New crew</H>
           <P>
@@ -405,7 +528,10 @@ function chapters(art: Art): Chapter[] {
           </P>
           <H>Solar flares</H>
           <P>
-            A <B className="text-[#ff7a6e]">solar flare</B> floods the surface with radiation for a short time. Crew outside head in, and anyone in an unshielded habitat takes heavy damage. Shield every habitat before the first one.
+            A <B className="text-[#ff7a6e]">solar flare</B> floods the surface with radiation for a short time. Crew outside head in, and anyone in an unshielded habitat takes damage. Shield every habitat before the first one.
+          </P>
+          <P>
+            These flares are <B>real</B>: each one is a flare NASA’s DONKI database recorded, and the log tells you its class and date. A stronger real flare (an X5 rather than an M2, say) does more harm. The first time, a card shows what the same kind of storm did on Mars in May 2024. See <B>Real NASA data</B> for more.
           </P>
           <P>You always get a warning in the mission log before each storm or flare.</P>
           <H>Drones, rovers and roads</H>
@@ -441,6 +567,56 @@ function chapters(art: Art): Chapter[] {
             </li>
           </ol>
           <Tip>Speed up time with the 2× and 3× buttons while you wait for stock to build up, and pause with <K>Space</K> whenever you need to think.</Tip>
+        </>
+      ),
+    },
+    {
+      title: 'Real NASA data',
+      kicker: 'Where the science comes from',
+      body: (
+        <>
+          <P>
+            The numbers that matter in RENOVA come from real NASA missions. Some are <B>live</B> (fetched while you play) and some are <B>archived</B> (copied into the game when it was made). The game always says which.
+          </P>
+          <H>Where we are: Mars Trek</H>
+          <MarsMap />
+          <P>
+            This colour map of Mars comes from <B>NASA Mars Trek</B> (built from Viking orbiter photos). We picture Colony 001 in <B>Arcadia Planitia</B>, a flat northern plain where water ice lies just under the ground, close enough for ice drills. The radiation numbers come from <B>Curiosity</B>, in Gale Crater, the rover that has measured Mars radiation the longest.
+          </P>
+          <H>Solar flares: DONKI</H>
+          <P>
+            Every solar flare in the game is a real one from <B>DONKI</B>, NASA’s space-weather database. When the game starts, it asks DONKI for the flares of the last 30 days. Right now: <B>{sun}</B>. Without a connection it replays 34 real X-class flares from 2024, like the <B>X9.0</B> of 3 October 2024 and the <B>X8.7</B> of 14 May 2024. A flare’s class decides how much it hurts unshielded crew: the stronger the real flare, the bigger the danger.
+          </P>
+          <H>Radiation on Mars: RadLab</H>
+          <DoseChart />
+          <P>
+            <B>RadLab</B> holds about 275,000 radiation readings that Curiosity’s RAD detector took on Mars between 2015 and 2024: on average <B>{MARS_RADIATION.averagePerDay} micrograys a day</B>. On <B>20 May 2024</B>, a storm of particles from the same sunspot group that made the big May flares hit Mars, and Curiosity measured <B>{MARS_RADIATION.stormDay.perDay.toLocaleString('en')} micrograys</B> in one day. That is why the game gives habitats regolith shields.
+          </P>
+          <H>Life in space: OSDR</H>
+          <ul className="space-y-2 font-sans text-[15px] normal-case leading-relaxed text-star/90">
+            {Object.values(OSDR_STUDIES).map((st) => (
+              <li key={st.id}>
+                <a href={st.link} target="_blank" rel="noreferrer" className="font-semibold text-mars underline underline-offset-2">
+                  {st.id}
+                </a>{' '}
+                {st.what}
+              </li>
+            ))}
+          </ul>
+          <H>All sources</H>
+          <Table
+            head={['Source', 'How RENOVA uses it']}
+            rows={SOURCES.map((src) => [
+              <a key={src.name} href={src.link} target="_blank" rel="noreferrer" className="text-mars underline underline-offset-2">
+                {src.name}
+                <span className="block text-[12px] text-star/60 no-underline">{src.by}</span>
+              </a>,
+              src.use,
+            ])}
+          />
+          <Tip>
+            What’s simplified: how fast machines work, how much they cost and how quickly health drops are game choices, not NASA numbers. They’re tuned so a whole mission fits into one play session. The flares, the radiation readings and the science facts are real.
+          </Tip>
         </>
       ),
     },
@@ -495,7 +671,18 @@ function chapters(art: Art): Chapter[] {
 
 /* ----------------------------------- dialog ----------------------------------- */
 
-export function HowToPlay({ onClose, doneLabel = 'Got it', closeable = true }: { onClose: () => void; doneLabel?: string; closeable?: boolean }) {
+export function HowToPlay({
+  onClose,
+  doneLabel = 'Got it',
+  closeable = true,
+  sun = 'the game checks the live feed when you start playing',
+}: {
+  onClose: () => void
+  doneLabel?: string
+  closeable?: boolean
+  /** Where the game's flares come from right now, in words. */
+  sun?: string
+}) {
   const art = useMemo<Art>(
     () => ({
       kinds: Object.fromEntries(KINDS.map((k) => [k, thumbURL(k)])),
@@ -504,7 +691,7 @@ export function HowToPlay({ onClose, doneLabel = 'Got it', closeable = true }: {
     }),
     [],
   )
-  const list = useMemo(() => chapters(art), [art])
+  const list = useMemo(() => chapters(art, sun), [art, sun])
   const [n, setN] = useState(0)
   const last = n === list.length - 1
   const page = list[n]

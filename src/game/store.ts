@@ -5,6 +5,7 @@
  */
 import { type Dir, type Kind } from '@/game/core/data'
 import { OutdatedSaveError, Sim, type Ent, type SaveData } from '@/game/core/sim'
+import { fetchRecentFlares, type FlareRecord } from '@/game/core/nasa'
 
 const SAVE_KEY = 'renova-save-v1'
 /** Where an unreadable save is kept, so a bad save never crashes the game twice and nothing is silently lost. */
@@ -233,8 +234,28 @@ export class GameStore {
     this.bump()
   }
 
+  /**
+   * Real space weather: the last 30 days of flares from NASA's DONKI feed. 'archive' when the
+   * feed can't be reached (or had no M/X flares), and the game replays flares from 2024.
+   */
+  spaceWeather: { status: 'loading' | 'live' | 'archive'; recs: FlareRecord[] } = { status: 'loading', recs: [] }
+
+  /** Ask DONKI for recent flares once, and feed them to the sim. */
+  async loadSpaceWeather(signal?: AbortSignal) {
+    const recs = await fetchRecentFlares(30, signal)
+    if (signal?.aborted) return
+    this.spaceWeather = recs && recs.length ? { status: 'live', recs } : { status: 'archive', recs: [] }
+    this.applySpaceWeather()
+    this.bump()
+  }
+
+  private applySpaceWeather() {
+    if (this.spaceWeather.status === 'live') this.sim.setFlarePool(this.spaceWeather.recs, true)
+  }
+
   newGame() {
     this.sim = GameStore.fresh()
+    this.applySpaceWeather()
     this.ui = { ...freshUI(this.ui.zoom), panel: 'help' }
     this.firstRun = true
     this.helpFrom = null

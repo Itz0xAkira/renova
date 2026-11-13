@@ -37,6 +37,7 @@ import {
   type StockId,
 } from '@/game/core/data'
 import { MISSIONS } from '@/game/core/missions'
+import { dayOf, FLARE_ARCHIVE, flareStrength, MARS_RADIATION, type FlareRecord } from '@/game/core/nasa'
 import {
   IN_BACK,
   IN_N,
@@ -834,6 +835,25 @@ export class Sim {
     } else e.inBuf[item] = (e.inBuf[item] ?? 0) + 1
   }
 
+  /**
+   * The real flares solar-flare events replay: DONKI's live feed when the game could fetch it,
+   * else the archive. Not saved; the store refills it on load.
+   */
+  private flarePool: { recs: FlareRecord[]; live: boolean } = { recs: FLARE_ARCHIVE, live: false }
+
+  /** Use these real flares for future events (the live DONKI feed). Ignored if empty. */
+  setFlarePool(recs: FlareRecord[], live: boolean) {
+    if (recs.length) this.flarePool = { recs, live }
+  }
+
+  /** Where flares currently come from, for the HUD. */
+  get flareSource() {
+    return { live: this.flarePool.live, count: this.flarePool.recs.length }
+  }
+
+  /** Has the space-weather card been shown this game? */
+  private toldFlares = false
+
   /** Sim steps taken: the clock for fair merging. */
   private tick = 0
 
@@ -1376,7 +1396,9 @@ export class Sim {
       e.status = !e.onGrid ? 'nogrid' : lifeSat < 0.5 ? 'nopower' : e.residents > 0 && !e.shielded ? 'unshielded' : e.shielded ? 'ok' : 'idle'
 
     let weight = 0
-    for (const s of this.shortages) weight += s === 'radiation' ? (flare ? 2 : 0.4) : s === 'power' ? 0.5 : s === 'housing' ? HOMELESS_WEIGHT : 1
+    // a flare hurts in proportion to its real X-ray class (an X1 doubles the radiation weight)
+    const hit = flare ? 2 * flareStrength(this.ev.flare!.rec?.cls ?? 'X1') : 0.4
+    for (const s of this.shortages) weight += s === 'radiation' ? hit : s === 'power' ? 0.5 : s === 'housing' ? HOMELESS_WEIGHT : 1
     if (weight > 0) this.health = Math.max(0, this.health - dt * 0.35 * weight)
     else this.health = Math.min(100, this.health + dt * 0.25)
 
@@ -1410,8 +1432,25 @@ export class Sim {
     }
     // solar particle events
     if (!ev.flare && t >= ev.nextFlare - 20) {
-      ev.flare = { start: ev.nextFlare, end: ev.nextFlare + 25 }
-      this.log('Solar flare detected! Radiation spike in 20 s — unshielded habitats are at risk.', 'warn')
+      // every flare is a real one from NASA's DONKI database
+      const pool = this.flarePool
+      const rec = pool.recs[Math.floor(this.rng() * pool.recs.length)]
+      ev.flare = { start: ev.nextFlare, end: ev.nextFlare + 25, rec, live: pool.live }
+      this.log(
+        `Solar flare warning: radiation arrives in 20 s! This is a real ${rec.cls} flare NASA recorded on ${dayOf(rec.peak)}${pool.live ? ' (live data)' : ''}. Crew in unshielded habitats will be hurt.`,
+        'warn',
+      )
+      if (!this.toldFlares) {
+        this.toldFlares = true
+        const { stormDay, averagePerDay } = MARS_RADIATION
+        this.popups.push({
+          kind: 'science',
+          title: `A real solar flare: ${rec.cls}`,
+          field: 'Space weather · NASA DONKI + Curiosity RAD',
+          body: `NASA's DONKI database recorded this ${rec.cls} flare on ${dayOf(rec.peak)}. Flares can fling fast particles across space. On Mars, the Curiosity rover usually measures about ${averagePerDay} micrograys of radiation a day; on ${dayOf(stormDay.date)} a solar storm pushed it to ${stormDay.perDay.toLocaleString('en')}, almost nine times more. Habitats beside a regolith shield keep the crew safe. Unshielded ones don't.`,
+          link: rec.link,
+        })
+      }
     }
     if (ev.flare && t >= ev.flare.end) {
       ev.flare = null
@@ -1495,7 +1534,7 @@ export class Sim {
       delivered: { ...this.delivered },
       owed: { ...this.owed },
       ents,
-      ev: { ...this.ev, storm: this.ev.storm && { ...this.ev.storm }, flare: this.ev.flare && { ...this.ev.flare } },
+      ev: { ...this.ev, storm: this.ev.storm && { ...this.ev.storm }, flare: this.ev.flare && { ...this.ev.flare, rec: this.ev.flare.rec && { ...this.ev.flare.rec } } },
       won: this.won,
       over: this.over,
       tips: [...this.tips],
@@ -1556,7 +1595,12 @@ export class Sim {
     }
     s.ev = {
       storm: span(ev.storm),
-      flare: span(ev.flare),
+      flare: (() => {
+        const f = span(ev.flare)
+        const o = obj(obj(ev.flare).rec)
+        if (f && typeof o.id === 'string' && typeof o.cls === 'string') return { ...f, rec: { id: o.id, cls: o.cls, peak: String(o.peak ?? ''), region: typeof o.region === 'number' ? o.region : null, link: String(o.link ?? '') }, live: obj(ev.flare).live === true }
+        return f
+      })(),
       nextStorm: num(ev.nextStorm, s.ev.nextStorm),
       nextFlare: num(ev.nextFlare, s.ev.nextFlare),
       nextShip: num(ev.nextShip, s.ev.nextShip),

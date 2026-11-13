@@ -2,11 +2,13 @@
 
 import { Chapter } from '../components/ui'
 import { useReveal } from '../lib/hooks'
+import { SOURCES } from '@/game/core/nasa'
 
 const FACTS = [
-  ['The idea', 'A Mars agricultural strategy game.'],
-  ['Our goal', 'Make complex scientific ideas fun and accessible.'],
-  ['Made for', 'Curious minds and future explorers.'],
+  ['The idea', 'A Mars outpost game where every choice is a real trade-off.'],
+  ['Built for', 'NASA Space Apps Challenge 2026: Build a Junior Astronaut Mission Trainer.'],
+  ['Made for', 'Explorers aged 7 to 12, and their families and classrooms.'],
+  ['Real data', 'Solar flares from NASA DONKI, Mars radiation from Curiosity, science from NASA OSDR.'],
 ]
 
 export function About() {
@@ -43,6 +45,25 @@ export function About() {
             </div>
           ))}
         </dl>
+
+        {/* where the science comes from: every dataset the game uses, and how */}
+        <div className="rv mt-16 lg:mt-24">
+          <p className="label text-navy/60">The NASA data inside RENOVA</p>
+          <ul className="mt-6 grid gap-6 md:grid-cols-2">
+            {SOURCES.map((src) => (
+              <li key={src.name} className="border-t border-navy/25 pt-4">
+                <a href={src.link} target="_blank" rel="noreferrer" className="font-display text-lg font-medium tracking-[-0.01em] underline decoration-navy/30 underline-offset-4 hover:decoration-rust">
+                  {src.name}
+                </a>
+                <p className="label mt-1 text-navy/55">{src.by}</p>
+                <p className="mt-2 leading-relaxed text-navy/80">{src.use}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-8 max-w-3xl text-sm leading-relaxed text-navy/65">
+            Live means the game asks NASA while you play; archived means the data was copied in when the game was made. How fast machines work and how quickly health drops are game choices tuned for play; the flares, radiation readings and science facts are real.
+          </p>
+        </div>
       </div>
     </section>
   )

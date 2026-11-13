@@ -6,6 +6,7 @@ import { RESERVE_KJ } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
 import type { ReactNode } from 'react'
 import { gridSummary } from './power'
+import { dayOf } from '@/game/core/nasa'
 import { Bar, btn, btnOn, fmt, Icon, panel, signed, TONE } from './kit'
 
 /** The top bar: colony clock and events, fixed-width readouts with rates, and the time and panel controls. */
@@ -40,6 +41,7 @@ export function TopBar({ store }: { store: GameStore }) {
             <Icon name="storm" /> Dust storm
           </p>
         )}
+        <SunData store={store} />
         {flare && (
           <p className={`${panel} flex animate-pulse items-center gap-1.5 border-[#B03E53] px-2 py-1.5 text-[#F3A6B6]`}>
             <Icon name="warn" /> Solar flare
@@ -98,6 +100,22 @@ export function TopBar({ store }: { store: GameStore }) {
         </button>
       </div>
     </div>
+  )
+}
+
+/** Where the game's solar flares come from right now: NASA's live feed, or the 2024 archive. */
+function SunData({ store }: { store: GameStore }) {
+  const w = store.spaceWeather
+  if (w.status === 'loading') return null
+  const top = w.recs[0]
+  const title =
+    w.status === 'live'
+      ? `Solar flares in this game are real: ${w.recs.length} flare${w.recs.length === 1 ? '' : 's'} from NASA DONKI in the last 30 days (live).${top ? ` Strongest: ${top.cls} on ${dayOf(top.peak)}.` : ''}`
+      : 'Solar flares in this game are real X-class flares from 2024, from NASA DONKI (archived: the live feed couldn’t be reached).'
+  return (
+    <p className={`${panel} flex items-center gap-1.5 px-2 py-1.5 text-[11px] ${w.status === 'live' ? 'text-[#F4D03F]' : 'text-[#BFBFBF]'}`} title={title}>
+      <Icon name="sun" size={18} /> {w.status === 'live' ? 'Live sun · NASA' : 'Sun · NASA 2024'}
+    </p>
   )
 }
 

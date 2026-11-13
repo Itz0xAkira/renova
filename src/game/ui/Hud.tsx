@@ -23,6 +23,14 @@ import { useHotkeys } from './hud/useHotkeys'
  * Layers, bottom to top: HUD panels → cursor hint → side panels (research,
  * power, menu) → popups → the guide.
  */
+/** Where the game's flares come from, for the guide. */
+function sunText(store: GameStore) {
+  const w = store.spaceWeather
+  if (w.status === 'loading') return 'checking NASA’s live feed…'
+  if (w.status === 'archive') return 'the live feed couldn’t be reached, so the game is using the 2024 archive'
+  return `live: ${w.recs.length} real flare${w.recs.length === 1 ? '' : 's'} from the last 30 days, the strongest an ${w.recs[0].cls}`
+}
+
 export function Hud({ store }: { store: GameStore }) {
   const { sim, ui } = store
   const thumbs = useMemo(() => Object.fromEntries(BUILD_ORDER.map((k) => [k, thumbURL(k)])) as Record<Kind, string>, [])
@@ -56,7 +64,7 @@ export function Hud({ store }: { store: GameStore }) {
       )}
       {ui.panel === 'help' && (
         <div className="absolute inset-0 z-40">
-          <HowToPlay onClose={() => store.closeHelp()} doneLabel={store.firstRun ? 'Begin mission' : store.helpFrom === 'menu' ? 'Back to the menu' : 'Back to the colony'} />
+          <HowToPlay sun={sunText(store)} onClose={() => store.closeHelp()} doneLabel={store.firstRun ? 'Begin mission' : store.helpFrom === 'menu' ? 'Back to the menu' : 'Back to the colony'} />
         </div>
       )}
     </div>

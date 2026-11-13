@@ -23,6 +23,9 @@ export default function GameRoot() {
     const debug = window as unknown as { __renova?: GameStore };
     if (process.env.NODE_ENV !== "production") debug.__renova = store;
     const release = store.claimSave();
+    // real space weather from NASA (falls back to the 2024 archive offline)
+    const weather = new AbortController();
+    void store.loadSpaceWeather(weather.signal);
     // Start the game on the next frame: under React StrictMode the first, throwaway mount is
     // cleaned up before then, so it never builds a second Phaser canvas.
     // WebGL can't make a 0×0 framebuffer, so if the container has no size yet (a tab that
@@ -65,6 +68,7 @@ export default function GameRoot() {
       window.removeEventListener("beforeunload", save);
       document.removeEventListener("visibilitychange", vis);
       release();
+      weather.abort();
       cancelAnimationFrame(frame);
       watch.disconnect();
       game?.destroy(true);
