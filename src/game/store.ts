@@ -20,6 +20,8 @@ export type UIState = {
   paused: boolean
   hover: [number, number] | null
   hoverErr: string | null
+  /** Footprint top-left of the build ghost under the cursor (set by the scene), for hints. */
+  ghostAt: [number, number] | null
   panel: Panel
   zoom: number
   /** Pointer position in screen pixels, for the cursor hint. */
@@ -42,6 +44,7 @@ const freshUI = (zoom = 3): UIState => ({
   paused: false,
   hover: null,
   hoverErr: null,
+  ghostAt: null,
   panel: null,
   zoom,
   pointer: null,

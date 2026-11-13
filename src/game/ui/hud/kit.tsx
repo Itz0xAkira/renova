@@ -24,8 +24,8 @@ export const signed = (n: number) => (Math.round(Math.abs(n)) === 0 ? '±0' : `$
 export const STATUS: Record<Status, [string, string]> = {
   ok: ['Running', 'bg-[#7BA750]'],
   idle: ['Idle', 'bg-[#5F5F5F]'],
-  nopower: ['No power', 'bg-[#F4D03F]'],
-  nogrid: ['Not connected — build a pylon', 'bg-[#D86B7B]'],
+  nopower: ['Not enough power — the grid is short', 'bg-[#F4D03F]'],
+  nogrid: ['Not connected to the grid', 'bg-[#D86B7B]'],
   noinput: ['Waiting for input', 'bg-[#8A8A8A]'],
   blocked: ['Output blocked', 'bg-[#D86B7B]'],
   unshielded: ['Unshielded — radiation!', 'bg-[#F4D03F]'],

@@ -334,10 +334,31 @@ function chapters(art: Art): Chapter[] {
           <P>
             A <B>solar panel</B> makes up to <B>{SOLAR_KW[0]} kW</B> at noon, less at dawn and dusk, and nothing at night. <B>Batteries</B> store daytime surplus ({BATTERY_KJ_LEVEL[0].toLocaleString('en')} kJ each) to carry you through the dark. After research, the <B>Kilopower reactor</B> gives a steady {REACTOR_KW[0]} kW day and night.
           </P>
-          <H>The grid</H>
+          <H>The grid: two ranges</H>
           <P>
-            Power only reaches buildings that are <B>connected</B>. The core powers everything within <B>{CORE_REACH} tiles</B>. A <B>pylon</B> powers everything within {PYLON_REACH[0]} tiles of it, and links by cable to the core or another pylon up to {PYLON_LINK[0]} tiles away (the core reaches {CORE_LINK}). Unconnected buildings show <B className="text-[#ff7a6e]">Not connected</B>. Press <K>P</K> to see the grid’s coverage on the map.
+            Power only reaches buildings that are <B>connected</B>, and every grid node (the core and each <B>pylon</B>) has two ranges:
           </P>
+          <Table
+            head={['', 'Area: what it powers', 'Cable: how far it links']}
+            rows={[
+              ['Core', `${CORE_REACH} tiles all round`, `${CORE_LINK} tiles`],
+              ...UPGRADES.pylon!.names.map((name, k) => [name, `${PYLON_REACH[k]} tiles all round`, `${PYLON_LINK[k]} tiles`]),
+            ]}
+          />
+          <P>
+            <B>Area</B>: the blue square around a node. A building with even one tile inside a connected area is on the grid. <B>Cable</B>: a pylon only works if a cable reaches it from the core or another working pylon, so you chain pylons out from the core like stepping stones.
+          </P>
+          <P>
+            You never have to guess. While you place anything that uses power, the blue areas show on the map and the note by your cursor says <B className="text-[#9fe3f5]">“Powered by…”</B> or exactly what’s missing. A pylon’s ghost draws the cable it would get, or says how far out of reach it is. Press <K>P</K> any time to see the whole grid.
+          </P>
+          <H>The two warnings</H>
+          <Table
+            head={['Warning', 'Means', 'Fix']}
+            rows={[
+              [<span key="n" className="text-[#ff7a6e]">Not connected to the grid</span>, 'No connected area reaches it, so it gets nothing at all.', 'Build a pylon close to it that a cable can reach.'],
+              [<span key="p" className="text-[#F4D03F]">Not enough power</span>, 'It’s connected, but the colony makes less power than it uses.', 'More solar, a battery for the night, or a reactor.'],
+            ]}
+          />
           <H>When there isn’t enough</H>
           <P>
             <B>Life support comes first</B>: the core, habitats and MOXIE get power before industry. The factories slow down, but the crew keep breathing. The power panel (click the power readout) shows who uses what.

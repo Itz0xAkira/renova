@@ -5,6 +5,7 @@ import type { IconName } from '@/game/art/icons'
 import { RESERVE_KJ } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
 import type { ReactNode } from 'react'
+import { gridSummary } from './power'
 import { Bar, btn, btnOn, fmt, Icon, panel, signed, TONE } from './kit'
 
 /** The top bar: colony clock and events, fixed-width readouts with rates, and the time and panel controls. */
@@ -19,6 +20,7 @@ export function TopBar({ store }: { store: GameStore }) {
   const housing = sim.housing()
   const need = (r: 'food' | 'water' | 'o2') => sim.colonists * NEEDS[r] * (r === 'water' && sim.done.has('recycling') ? 0.4 : 1)
   const res = RESEARCH.find((r) => r.id === sim.current)
+  const power = gridSummary(sim)
 
   return (
     <div className="pointer-events-auto grid grid-cols-[1fr_auto] items-start gap-2 2xl:grid-cols-[1fr_auto_1fr]">
@@ -55,12 +57,12 @@ export function TopBar({ store }: { store: GameStore }) {
           onClick={() => store.setPanel('power')}
           icon="power"
           label="Power"
-          value={`${Math.round(P.gen)}/${Math.round(P.demand)}`}
+          value={signed(P.gen - P.demand)}
           unit="kW"
           wide
-          tone={sim.shortages.has('power') ? 'bad' : undefined}
+          tone={power.tone === 'good' ? 'good' : power.tone}
           bar={[P.stored / reserve, '#65C9E8']}
-          hint={`Generation / demand. Batteries: ${fmt(P.stored)} of ${fmt(reserve)} kJ. Click for the power panel.`}
+          hint={`${power.text} Making ${Math.round(P.gen)} kW, using ${Math.round(P.demand)} kW. Batteries ${Math.floor((P.stored / reserve) * 100)}% (${fmt(P.stored)} of ${fmt(reserve)} kJ). Click for the power panel.`}
         />
         <Stock store={store} id="water" need={need('water')} />
         <Stock store={store} id="food" need={need('food')} />

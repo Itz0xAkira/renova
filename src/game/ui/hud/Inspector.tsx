@@ -3,6 +3,7 @@
 import { BATTERY_KJ_LEVEL, BUILDINGS, ITEMS, MAX_LEVEL, SHIELD_REACH, STATION_MAX_PLANTS, UPGRADES, type ItemId } from '@/game/core/data'
 import { RESERVE_KJ, type Ent } from '@/game/core/sim'
 import type { GameStore } from '@/game/store'
+import { gridHint } from './power'
 import { Bar, btn, fmt, Icon, Items, panel, Recipe, Row, STATUS, TONE } from './kit'
 
 /** Where a machine's products go, in words: its outlet belts and the buildings it feeds directly. */
@@ -22,7 +23,7 @@ export function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb
   const up = UPGRADES[e.kind]
   const cost = sim.upgradeCost(e)
   const canPay = !!cost && sim.stock.metal >= cost.metal && sim.stock.brick >= cost.brick
-  const needsGrid = def.power > 0 || !!def.gen
+  const grid = gridHint(sim, e)
   const [label, dot] = STATUS[e.status]
   const flat = e.kind === 'belt' || e.kind === 'junction'
   return (
@@ -64,7 +65,7 @@ export function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb
             }
           />
         )}
-        {needsGrid && <Row k="Grid" v={e.onGrid ? <span className={TONE.cyan}>Connected</span> : <span className={TONE.bad}>Not connected — build a pylon</span>} />}
+        {grid && <Row k="Grid" v={<span className={grid.ok ? TONE.cyan : TONE.bad}>{grid.text}</span>} />}
         {(def.recipe || def.mines) && <Row k="Makes" v={<Recipe def={def} />} />}
         {def.mines && <Row k="Here" v={e.mineItem ? <Icon name={e.mineItem} size={18} /> : <span className={TONE.bad}>nothing to mine</span>} />}
         {def.recipe && <Row k="Input" v={<Items list={e.inBuf} />} />}
@@ -75,7 +76,8 @@ export function Inspector({ store, e, thumb }: { store: GameStore; e: Ent; thumb
             k="Power"
             v={
               <span className="inline-flex items-center gap-1">
-                <Icon name="power" size={16} /> {Math.round(sim.draw(e))} kW
+                <Icon name="power" size={16} /> uses {Math.round(sim.draw(e))} kW
+                {e.onGrid && sim.satFor(e) < 0.99 && <span className={TONE.warn}>· getting {Math.round(sim.satFor(e) * 100)}%</span>}
               </span>
             }
           />

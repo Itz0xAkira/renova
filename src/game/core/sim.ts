@@ -86,7 +86,8 @@ export const TRACK_WEAR = 3
 export const ROAD_WEAR = 12
 
 /** Does this building do nothing unless it is connected to the grid? */
-const needsGrid = (k: Kind) => BUILDINGS[k].power > 0 || !!BUILDINGS[k].gen || k === 'battery' || k === 'pylon'
+/** Buildings that only work when connected to the power grid. */
+export const needsGrid = (k: Kind) => BUILDINGS[k].power > 0 || !!BUILDINGS[k].gen || k === 'battery' || k === 'pylon'
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
@@ -568,6 +569,59 @@ export class Sim {
       }
       e.onGrid = this.anyCovered(e.kind, e.i, e.j)
     }
+  }
+
+  /** The core and every pylon that is joined to it by cables: the nodes that actually power things. */
+  private gridNodes(): Ent[] {
+    this.ensureGrid()
+    return [this.coreEnt, ...this.list('pylon').filter((p) => p.onGrid)]
+  }
+
+  /**
+   * The grid node powering a `kind` footprint at (i, j): the core or a connected pylon whose
+   * square reaches it (the nearest, if several do). Null if none does.
+   */
+  gridSource(kind: Kind, i: number, j: number): Ent | null {
+    const { w, h } = BUILDINGS[kind]
+    let best: Ent | null = null
+    let bestD = Infinity
+    for (const n of this.gridNodes()) {
+      const r = this.nodeReach(n)
+      const N = BUILDINGS[n.kind]
+      const reaches = i < n.i + N.w + r && i + w > n.i - r && j < n.j + N.h + r && j + h > n.j - r
+      if (!reaches) continue
+      const d = Math.hypot(i + (w - 1) / 2 - (n.i + (N.w - 1) / 2), j + (h - 1) / 2 - (n.j + (N.h - 1) / 2))
+      if (d < bestD) {
+        best = n
+        bestD = d
+      }
+    }
+    return best
+  }
+
+  /**
+   * Would a new pylon at (i, j) join the grid? It needs a cable to the core or a connected pylon:
+   * within the longer of the two cable reaches, centre to centre. Returns the node it would link
+   * to, or the nearest node and how far short it falls.
+   */
+  pylonLink(i: number, j: number): { via: Ent | null; near: Ent | null; dist: number; reach: number } {
+    let near: Ent | null = null
+    let nearGap = Infinity
+    let nearDist = 0
+    let nearReach = 0
+    for (const n of this.gridNodes()) {
+      const N = BUILDINGS[n.kind]
+      const dist = Math.hypot(i - (n.i + (N.w - 1) / 2), j - (n.j + (N.h - 1) / 2))
+      const reach = Math.max(PYLON_LINK[0], this.nodeLink(n))
+      if (dist <= reach) return { via: n, near: n, dist, reach }
+      if (dist - reach < nearGap) {
+        nearGap = dist - reach
+        near = n
+        nearDist = dist
+        nearReach = reach
+      }
+    }
+    return { via: null, near, dist: nearDist, reach: nearReach }
   }
 
   /** Is any tile of a `kind` footprint at (i, j) inside grid coverage? (How buildings join the grid.) */

@@ -165,6 +165,7 @@ export class Overlays {
     for (const a of this.arrows) a.setVisible(false)
     this.arrowsShown = 0
     ui.hoverErr = null
+    ui.ghostAt = null
 
     // the selected building keeps a steady outline
     const sel = this.store.selectedEnt()
@@ -175,6 +176,7 @@ export class Overlays {
       const [i, j] = this.anchor(tool) ?? h
       const err = sim.placeError(tool, i, j)
       ui.hoverErr = err
+      ui.ghostAt = [i, j]
       this.outline(tool, i, j, err ? 0xff5a4f : 0xfff7e8, 0.95)
       const f = Math.floor(now / 250) % FRAMES
       const [x, cy] = centreOf(tool, i, j)
