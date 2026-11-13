@@ -14,9 +14,9 @@ export function PopupCard({ store }: { store: GameStore }) {
   const primary = `${btn} justify-center border-[#C8754D] bg-[#A95738] text-white hover:bg-[#C8754D]`
   return (
     <Modal title={p.title} icon={icon}>
-      <p className="text-[10px] text-[#E5B07A]">{kicker}</p>
-      <p className="mt-2 font-sans text-[13px] normal-case leading-relaxed text-[#F6F6F6]">{p.body}</p>
-      <div className="mt-5 grid gap-2 text-xs sm:grid-cols-2">
+      <p className="text-[12px] text-[#E5B07A]">{kicker}</p>
+      <p className="mt-2 font-sans text-[15px] normal-case leading-relaxed text-[#F6F6F6]">{p.body}</p>
+      <div className="mt-5 grid gap-2 text-sm sm:grid-cols-2">
         {p.kind === 'lose' ? (
           <>
             <button type="button" className={primary} onClick={() => store.newGame()} autoFocus>

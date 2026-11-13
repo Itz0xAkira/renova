@@ -10,7 +10,7 @@ import type { Status } from '@/game/core/sim'
 export const panel = 'border border-[#3F4246] bg-[#1F2022]/95 shadow-[inset_0_1px_0_#5A5D60,0_3px_0_rgba(0,0,0,0.45)]'
 
 export const btn =
-  'flex items-center gap-1.5 border border-[#3F4246] bg-[#2E3033] px-2 py-1.5 uppercase text-[#D9D9D9] shadow-[inset_0_1px_0_#5A5D60] transition-colors hover:border-[#C8754D] hover:text-white active:translate-y-px disabled:opacity-40'
+  'flex items-center gap-1.5 border border-[#3F4246] bg-[#2E3033] px-2.5 py-2 uppercase text-[#D9D9D9] shadow-[inset_0_1px_0_#5A5D60] transition-colors hover:border-[#C8754D] hover:text-white active:translate-y-px disabled:opacity-40'
 
 export const btnOn = 'border-[#C8754D] bg-[#A95738]/35 text-white'
 
@@ -41,14 +41,14 @@ export const CATEGORY: { id: BuildingDef['group']; name: string; icon: IconName 
   { id: 'science', name: 'Science', icon: 'science' },
 ]
 
-export function Icon({ name, size = 18, className = '' }: { name: IconName; size?: number; className?: string }) {
+export function Icon({ name, size = 24, className = '' }: { name: IconName; size?: number; className?: string }) {
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={iconURL(name)} alt="" width={size} height={size} className={`pixelated inline-block shrink-0 ${className}`} style={{ width: size, height: size }} />
 }
 
 export function Bar({ value, color, className = '' }: { value: number; color: string; className?: string }) {
   return (
-    <span className={`block h-1.5 border border-[#151618] bg-[#151618] ${className}`}>
+    <span className={`block h-2 border border-[#151618] bg-[#151618] ${className}`}>
       <span className="block h-full" style={{ width: `${Math.max(0, Math.min(1, value)) * 100}%`, background: color, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25)' }} />
     </span>
   )
@@ -64,7 +64,7 @@ export function Items({ list }: { list: Partial<Record<ItemId, number>> }) {
         <span key={k} className="inline-flex items-center gap-0.5" title={ITEMS[k].name}>
           {i > 0 && <span className={TONE.label}>+</span>}
           <span>{n}</span>
-          <Icon name={k} size={14} />
+          <Icon name={k} size={18} />
         </span>
       ))}
     </span>
@@ -88,7 +88,7 @@ export function Recipe({ def }: { def: BuildingDef }) {
           <span key={g} className="inline-flex items-center gap-1">
             <span className={TONE.label}>{g}</span>
             <span className="text-[#C8754D]">→</span>
-            <Icon name={item as ItemId} size={14} />
+            <Icon name={item as ItemId} size={18} />
           </span>
         ))}
       </span>
@@ -103,13 +103,13 @@ export function Cost({ def, poor }: { def: BuildingDef; poor?: boolean }) {
     <span className={`inline-flex items-center gap-1 ${poor ? TONE.bad : ''}`}>
       {c.metal ? (
         <span className="inline-flex items-center gap-0.5">
-          <Icon name="metal" size={12} />
+          <Icon name="metal" size={16} />
           {c.metal}
         </span>
       ) : null}
       {c.brick ? (
         <span className="inline-flex items-center gap-0.5">
-          <Icon name="brick" size={12} />
+          <Icon name="brick" size={16} />
           {c.brick}
         </span>
       ) : null}
@@ -142,11 +142,11 @@ export function Modal({ title, icon, children, onClose, wide }: { title: string;
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
-        className={`${panel} rise max-h-full outline-none w-full overflow-y-auto border-t-2 border-t-[#C8754D] ${wide ? 'max-w-2xl' : 'max-w-md'}`}
+        className={`${panel} rise max-h-full outline-none w-full overflow-y-auto border-t-2 border-t-[#C8754D] ${wide ? 'max-w-4xl' : 'max-w-xl'}`}
       >
         <div className="flex items-center gap-2 border-b border-[#3F4246] bg-[#2E3033] px-4 py-2.5">
           {icon && <Icon name={icon} />}
-          <p className="flex-1 text-sm text-white">{title}</p>
+          <p className="flex-1 text-base text-white">{title}</p>
           {onClose && (
             <button type="button" onClick={onClose} className="text-[#8A8A8A] hover:text-white" aria-label="Close">
               ✕

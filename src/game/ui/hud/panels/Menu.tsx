@@ -10,7 +10,7 @@ import { btn, Icon, Modal } from '../kit'
 export function Menu({ store }: { store: GameStore }) {
   const [confirm, setConfirm] = useState(false)
   const [saved, setSaved] = useState<null | boolean>(null)
-  const row = `${btn} justify-start py-2 text-xs`
+  const row = `${btn} justify-start py-2 text-sm`
   return (
     <Modal title="Paused" icon="menu" onClose={() => store.setPanel(null)}>
       <nav className="flex flex-col gap-1.5">
@@ -36,7 +36,7 @@ export function Menu({ store }: { store: GameStore }) {
           <Icon name="remove" /> Exit to website
         </Link>
       </nav>
-      <p className="mt-3 font-sans text-[11px] normal-case text-[#8A8A8A]">
+      <p className="mt-3 font-sans text-[13px] normal-case text-[#8A8A8A]">
         {store.readOnly
           ? 'This tab has stopped saving because RENOVA is open in another tab.'
           : saved === false

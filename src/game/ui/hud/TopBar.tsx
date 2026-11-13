@@ -21,14 +21,14 @@ export function TopBar({ store }: { store: GameStore }) {
   const res = RESEARCH.find((r) => r.id === sim.current)
 
   return (
-    <div className="pointer-events-auto flex flex-col gap-1.5 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-start">
+    <div className="pointer-events-auto grid grid-cols-[1fr_auto] items-start gap-2 2xl:grid-cols-[1fr_auto_1fr]">
       {/* colony clock and events */}
-      <div className="flex flex-wrap items-center gap-1.5 lg:justify-self-start">
-        <div className={`${panel} flex w-[10.5rem] shrink-0 items-center gap-2 px-2.5 py-1.5 tabular-nums`}>
-          <Icon name={sun > 0.05 ? 'sun' : 'moon'} size={22} />
+      <div className="order-1 flex flex-wrap items-center gap-2 justify-self-start">
+        <div className={`${panel} flex w-[13rem] shrink-0 items-center gap-2 px-2.5 py-1.5 tabular-nums`}>
+          <Icon name={sun > 0.05 ? 'sun' : 'moon'} size={30} />
           <span className="leading-tight">
             <span className="block whitespace-nowrap text-[#C8754D]">Colony 001</span>
-            <span className="block whitespace-nowrap text-xs text-white">
+            <span className="block whitespace-nowrap text-sm text-white">
               Sol {String(sim.solNumber()).padStart(3, '0')} · {sim.clock()}
             </span>
           </span>
@@ -46,7 +46,7 @@ export function TopBar({ store }: { store: GameStore }) {
       </div>
 
       {/* colony readouts */}
-      <dl className={`${panel} flex flex-wrap divide-x divide-[#3F4246] lg:justify-self-center`}>
+      <dl className={`${panel} order-3 col-span-2 flex flex-wrap justify-self-start divide-x divide-[#3F4246] 2xl:order-2 2xl:col-span-1 2xl:justify-self-center`}>
         <Stat icon="crew" label="Crew" value={`${sim.colonists}/${housing}`} tone={sim.shortages.has('housing') ? 'bad' : sim.colonists >= housing ? 'warn' : undefined}
           hint={sim.shortages.has('housing') ? 'Colonists / beds · some crew have no powered bed and are losing health. Build a habitat on the grid.' : 'Colonists / powered beds'}
         />
@@ -70,7 +70,7 @@ export function TopBar({ store }: { store: GameStore }) {
       </dl>
 
       {/* controls */}
-      <div className="flex items-center gap-1 lg:justify-self-end">
+      <div className="order-2 flex items-center gap-1.5 justify-self-end 2xl:order-3">
         <button type="button" className={`${btn} ${ui.paused ? btnOn : ''}`} onClick={() => store.togglePause()} aria-pressed={ui.paused} aria-label={ui.paused ? 'Resume' : 'Pause'} title="Pause · Space">
           <Icon name={ui.paused ? 'play' : 'pause'} />
         </button>
@@ -81,11 +81,11 @@ export function TopBar({ store }: { store: GameStore }) {
             </button>
           ))}
         </div>
-        <button type="button" className={`${btn} w-[7.5rem] shrink-0`} onClick={() => store.setPanel('research')} title="Research · T">
+        <button type="button" className={`${btn} w-[9.5rem] shrink-0`} onClick={() => store.setPanel('research')} title="Research · T">
           <Icon name="research" />
           <span className="flex-1 text-left leading-tight">
             <span className="block">Research</span>
-            {res ? <Bar value={sim.rp / res.cost} color="#65C9E8" className="mt-0.5" /> : <span className={`block text-[8px] ${TONE.good}`}>All done</span>}
+            {res ? <Bar value={sim.rp / res.cost} color="#65C9E8" className="mt-0.5" /> : <span className={`block text-[10px] ${TONE.good}`}>All done</span>}
           </span>
         </button>
         <button type="button" className={btn} onClick={() => store.setPanel('help')} title="How to play · H" aria-label="How to play">
@@ -130,17 +130,17 @@ export function Stat({
     <Tag
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`flex shrink-0 items-center gap-1.5 overflow-hidden px-2 py-1 text-left ${wide ? 'w-[8.5rem]' : 'w-[5.4rem]'} ${onClick ? 'hover:bg-[#2E3033]' : ''}`}
+      className={`flex shrink-0 items-center gap-1.5 overflow-hidden px-2 py-1 text-left ${wide ? 'w-[9.6rem] xl:w-[10.6rem]' : 'w-[6.2rem] xl:w-[6.9rem]'} ${onClick ? 'hover:bg-[#2E3033]' : ''}`}
       title={hint ?? label}
     >
-      <Icon name={icon} size={18} />
+      <Icon name={icon} size={24} />
       <div className="min-w-0 flex-1 leading-tight">
         <dt className="sr-only">{label}</dt>
-        <dd className={`whitespace-nowrap text-xs tabular-nums sm:text-[13px] ${tone ? TONE[tone] : 'text-white'}`}>
+        <dd className={`whitespace-nowrap text-[15px] tabular-nums sm:text-[17px] ${tone ? TONE[tone] : 'text-white'}`}>
           {value}
-          {unit && <span className="ml-0.5 text-[8px] text-[#8A8A8A]">{unit}</span>}
+          {unit && <span className="ml-0.5 text-[10px] text-[#8A8A8A]">{unit}</span>}
         </dd>
-        {bar ? <Bar value={bar[0]} color={bar[1]} className="mt-0.5" /> : <span className="block whitespace-nowrap text-[8px] tabular-nums">{sub ?? <span className={TONE.label}>{label}</span>}</span>}
+        {bar ? <Bar value={bar[0]} color={bar[1]} className="mt-0.5" /> : <span className="block whitespace-nowrap text-[10px] tabular-nums">{sub ?? <span className={TONE.label}>{label}</span>}</span>}
       </div>
     </Tag>
   )

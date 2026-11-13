@@ -21,8 +21,8 @@ export function CursorHint({ store }: { store: GameStore }) {
   if (ui.tool) {
     if (!ui.hoverErr) return null
     return (
-      <p aria-hidden className={`${panel} pointer-events-none absolute z-10 flex items-center gap-1 whitespace-nowrap border-[#B03E53] px-2 py-1 text-[9px] text-[#F3A6B6]`} style={at}>
-        <Icon name="warn" size={12} /> {ui.hoverErr}
+      <p aria-hidden className={`${panel} pointer-events-none absolute z-10 flex items-center gap-1 whitespace-nowrap border-[#B03E53] px-2 py-1 text-[11px] text-[#F3A6B6]`} style={at}>
+        <Icon name="warn" size={16} /> {ui.hoverErr}
       </p>
     )
   }
@@ -32,7 +32,7 @@ export function CursorHint({ store }: { store: GameStore }) {
   const [label, dot] = STATUS[e.status]
   const flat = e.kind === 'belt' || e.kind === 'junction'
   return (
-    <p aria-hidden className={`${panel} pointer-events-none absolute z-10 whitespace-nowrap px-2 py-1 text-[9px]`} style={at}>
+    <p aria-hidden className={`${panel} pointer-events-none absolute z-10 whitespace-nowrap px-2 py-1 text-[11px]`} style={at}>
       <span className="text-white">{def.name}</span>
       <span className="text-[#8A8A8A]">
         {' '}

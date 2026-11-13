@@ -1,208 +1,475 @@
 'use client'
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { groundURL, itemURL, thumbURL } from '@/game/art/sprites'
-import { BUILDINGS, ITEMS, NEEDS, SHIELD_REACH, type ItemId, type Kind } from '@/game/core/data'
+import {
+  BATTERY_KJ_LEVEL,
+  BUILDINGS,
+  CORE_LINK,
+  CORE_REACH,
+  HABITAT_BEDS,
+  HOTKEYS,
+  ITEMS,
+  MAX_LEVEL,
+  NEEDS,
+  PYLON_LINK,
+  PYLON_REACH,
+  REACTOR_KW,
+  RESEARCH,
+  SHIELD_REACH,
+  SOLAR_KW,
+  SPEED,
+  STATION_MAX_PLANTS,
+  UPGRADES,
+  type ItemId,
+  type Kind,
+} from '@/game/core/data'
 import { MISSIONS } from '@/game/core/missions'
 
 /**
- * Illustrated, paged guide to RENOVA. Used on first launch, from the in-game
- * HUD and menu, and from the website's title screen.
+ * The illustrated field manual for RENOVA. Used on first launch, from the HUD
+ * and the pause menu, and from the website's title screen.
+ *
+ * Every number in it is read from the game data, so the guide stays right
+ * when the balance changes. Chapters are listed down the side on wide screens;
+ * arrow keys or the buttons page through them.
  */
 
 type Art = { kinds: Record<string, string>; items: Record<ItemId, string>; ground: Record<'ice' | 'ore' | 'sand', string> }
 
-const KINDS: Kind[] = ['core', 'belt', 'drill', 'excavator', 'melter', 'smelter', 'kiln', 'washer', 'greenhouse', 'moxie', 'habitat', 'shield', 'solar', 'battery', 'lab']
+const KINDS: Kind[] = ['core', 'belt', 'junction', 'drill', 'excavator', 'melter', 'smelter', 'kiln', 'washer', 'greenhouse', 'moxie', 'habitat', 'shield', 'solar', 'pylon', 'battery', 'reactor', 'lab']
 
-function Sprite({ src, label, size = 'md' }: { src: string; label?: string; size?: 'sm' | 'md' }) {
+/* ------------------------------- building blocks ------------------------------- */
+
+function Sprite({ src, label, size = 'md' }: { src: string; label?: string; size?: 'sm' | 'md' | 'lg' }) {
+  const cls = size === 'sm' ? 'h-9 w-9' : size === 'lg' ? 'h-20 w-[4.2rem]' : 'h-14 w-[2.9rem]'
   return (
-    <span className="inline-flex flex-col items-center gap-0.5">
+    <span className="inline-flex flex-col items-center gap-1">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={label ?? ''} className={`pixelated ${size === 'sm' ? 'h-7 w-7' : 'h-12 w-10'}`} />
-      {label && <span className="text-[8px] leading-none text-star/70">{label}</span>}
+      <img src={src} alt={label ?? ''} className={`pixelated ${cls}`} />
+      {label && <span className="text-center text-[10px] leading-tight text-star/75">{label}</span>}
     </span>
   )
 }
 
 const Arrow = () => (
-  <span aria-hidden className="px-0.5 text-mars">
+  <span aria-hidden className="px-1 text-lg text-mars">
     →
   </span>
 )
 
-function Chain({ art, steps }: { art: Art; steps: ({ item: ItemId } | { kind: Kind } | { ground: 'ice' | 'ore' | 'sand' })[] }) {
+type Step = { item: ItemId } | { kind: Kind } | { ground: 'ice' | 'ore' | 'sand' }
+
+function Chain({ art, steps, note }: { art: Art; steps: Step[]; note?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-1 border-2 border-star/10 bg-star/[0.03] px-2 py-1.5">
-      {steps.map((s, k) => (
-        <span key={k} className="inline-flex items-center gap-1">
-          {k > 0 && <Arrow />}
-          {'item' in s ? (
-            <Sprite src={art.items[s.item]} label={ITEMS[s.item].name} size="sm" />
-          ) : 'kind' in s ? (
-            <Sprite src={art.kinds[s.kind]} label={BUILDINGS[s.kind].short} />
-          ) : (
-            <Sprite src={art.ground[s.ground]} label={s.ground === 'ice' ? 'Ice ground' : s.ground === 'ore' ? 'Ore ground' : 'Sand'} size="sm" />
-          )}
-        </span>
-      ))}
+    <div className="border-2 border-star/10 bg-star/[0.03] px-3 py-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {steps.map((s, k) => (
+          <span key={k} className="inline-flex items-center gap-1.5">
+            {k > 0 && <Arrow />}
+            {'item' in s ? (
+              <Sprite src={art.items[s.item]} label={ITEMS[s.item].name} size="sm" />
+            ) : 'kind' in s ? (
+              <Sprite src={art.kinds[s.kind]} label={BUILDINGS[s.kind].short} />
+            ) : (
+              <Sprite src={art.ground[s.ground]} label={s.ground === 'ice' ? 'Ice ground' : s.ground === 'ore' ? 'Ore ground' : 'Sand'} size="sm" />
+            )}
+          </span>
+        ))}
+      </div>
+      {note && <p className="mt-1.5 font-sans text-[13px] normal-case text-star/70">{note}</p>}
     </div>
   )
 }
 
-const P = ({ children }: { children: ReactNode }) => <p className="font-sans text-[13px] normal-case leading-relaxed text-star/85">{children}</p>
+/** Body text: a readable sans at 15px with generous line height. */
+const P = ({ children }: { children: ReactNode }) => <p className="font-sans text-[15px] normal-case leading-[1.7] text-star/90">{children}</p>
 const B = ({ children, className = 'text-star' }: { children: ReactNode; className?: string }) => <b className={`font-semibold ${className}`}>{children}</b>
+const K = ({ children }: { children: ReactNode }) => (
+  <kbd className="mx-0.5 inline-block min-w-[1.6em] border-2 border-star/30 bg-star/10 px-1 py-px text-center font-pixel text-[11px] not-italic leading-tight text-star">{children}</kbd>
+)
+const H = ({ children }: { children: ReactNode }) => <h3 className="pt-1 font-pixel text-[13px] text-sand">{children}</h3>
 
-function pages(art: Art): { title: string; kicker: string; body: ReactNode }[] {
+/** A highlighted hint box. */
+function Tip({ children, tone = 'tip' }: { children: ReactNode; tone?: 'tip' | 'warn' }) {
+  return (
+    <div className={`flex gap-3 border-l-4 px-3 py-2.5 font-sans text-[14px] normal-case leading-relaxed ${tone === 'warn' ? 'border-[#ff7a6e] bg-[#ff7a6e]/10 text-[#ffd2cc]' : 'border-mars bg-mars/10 text-star/90'}`}>
+      <span className="font-pixel text-[11px] uppercase text-mars">{tone === 'warn' ? 'Careful' : 'Tip'}</span>
+      <div className="flex-1">{children}</div>
+    </div>
+  )
+}
+
+/** A simple two-or-more column table. */
+function Table({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
+  return (
+    <div className="overflow-x-auto border-2 border-star/10">
+      <table className="w-full border-collapse font-sans text-[14px] normal-case">
+        <thead>
+          <tr className="bg-star/[0.06] text-left font-pixel text-[11px] uppercase text-sand">
+            {head.map((h) => (
+              <th key={h} className="px-3 py-2 font-normal">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, k) => (
+            <tr key={k} className="border-t border-star/10 align-top">
+              {r.map((c, n) => (
+                <td key={n} className={`px-3 py-2 ${n === 0 ? 'text-star' : 'text-star/80'}`}>
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const items = (list: Partial<Record<ItemId, number>>) =>
+  (Object.entries(list) as [ItemId, number][])
+    .map(([k, n]) => `${n} ${ITEMS[k].name.toLowerCase()}`)
+    .join(' + ')
+
+const cost = (k: Kind) => {
+  const c = BUILDINGS[k].cost
+  return [c.metal ? `${c.metal} metal` : '', c.brick ? `${c.brick} bricks` : ''].filter(Boolean).join(' + ') || 'free'
+}
+
+/* ---------------------------------- chapters ---------------------------------- */
+
+type Chapter = { title: string; kicker: string; body: ReactNode }
+
+function chapters(art: Art): Chapter[] {
+  const machines: Kind[] = ['melter', 'smelter', 'kiln', 'washer', 'greenhouse']
+  const coreBeds = BUILDINGS.core.housing ?? 0
   return [
     {
-      title: 'Your mission',
-      kicker: 'Mars is 225 million km from home',
+      title: 'Welcome to Mars',
+      kicker: 'Your mission',
       body: (
         <>
-          <div className="flex items-end justify-center gap-4 py-2">
-            <Sprite src={art.kinds.core} label="Colony core" />
-            <Sprite src={art.kinds.habitat} label="Habitat" />
-            <Sprite src={art.kinds.greenhouse} label="Greenhouse" />
-            <Sprite src={art.kinds.solar} label="Solar" />
+          <div className="flex flex-wrap items-end justify-center gap-5 py-2">
+            <Sprite src={art.kinds.core} label="Colony core" size="lg" />
+            <Sprite src={art.kinds.habitat} label="Habitat" size="lg" />
+            <Sprite src={art.kinds.greenhouse} label="Greenhouse" size="lg" />
+            <Sprite src={art.kinds.solar} label="Solar" size="lg" />
           </div>
           <P>
-            You land with <B>4 crew</B>, a little food, water and air — and no deliveries for months. Build a factory that turns Mars itself into everything the colony needs.
+            Your lander has touched down with <B>4 crew</B>, a few days of food, water and air, and a core full of building stock. Earth is 225 million km away, so nothing else is coming for a long time. You have to build a factory that turns Mars itself (ice, rock and sunlight) into everything the colony needs.
           </P>
+          <H>How you win</H>
           <P>
-            Follow the <B>mission log</B> on the left of the screen. Finish all {MISSIONS.length} missions and grow the colony to <B>20 colonists</B> to win.
+            Work through the <B>mission log</B> at the top left. Each mission teaches one part of the colony. Finish all <B>{MISSIONS.length} missions</B>, the last of which is growing to <B>20 colonists</B> with nothing running short, and Colony 001 is self-sufficient.
           </P>
+          <H>How you lose</H>
+          <P>
+            If food, water, oxygen, power or housing runs short, <B>colony health</B> falls. At <B>0%</B> the crew evacuate and the mission fails. Health recovers on its own once every shortage is fixed.
+          </P>
+          <Tip>The game pauses whenever this guide or a panel is open. Press <K>H</K> any time to come back here.</Tip>
         </>
       ),
     },
     {
-      title: '1 · Mine',
+      title: 'Reading the screen',
+      kicker: 'The HUD',
+      body: (
+        <>
+          <Table
+            head={['Where', 'What it tells you']}
+            rows={[
+              ['Top left', 'The sol (Martian day) and time. The sun or moon icon shows day and night; storm and flare warnings appear here.'],
+              ['Top bar', 'Crew / beds, colony health, power (made / used, with the battery bar), then your stocks of water, food, oxygen, metal and bricks.'],
+              ['Under each stock', 'How fast it is changing per sol: ▲ rising, ▼ falling. Red means it will run out soon. Hover for the exact numbers.'],
+              ['Top right', 'Pause, game speed 1× 2× 3×, research progress, this guide and the menu.'],
+              ['Left', 'The mission log: your current goal, a progress bar, a tip, and the latest colony messages.'],
+              ['Right', 'The inspector: click any building to see what it is doing, what it holds, its power use and its upgrade.'],
+              ['Bottom', 'The build bar, grouped by category, with each building’s cost and hotkey. Hover a card to read about it.'],
+            ]}
+          />
+          <Tip>Click the power readout in the top bar to open the power panel, with a graph of the last few sols.</Tip>
+        </>
+      ),
+    },
+    {
+      title: 'Building',
+      kicker: 'Placing, rotating, removing',
+      body: (
+        <>
+          <P>
+            Pick a building from the bar at the bottom, or press its number key. A see-through <B>ghost</B> follows your cursor, with its <B>footprint</B> outlined on the ground: green if it fits, red if it doesn’t, with the reason next to the cursor. <B>Click</B> to build.
+          </P>
+          <H>Sizes</H>
+          <P>
+            Buildings are big. Machines take <B>2×2</B> or <B>3×3</B> tiles, the greenhouse <B>4×3</B>. Belts, junctions and pylons take a single tile. Nothing can be built on <B>grey boulders</B> or in <B>craters</B>.
+          </P>
+          <H>Facing</H>
+          <P>
+            Machines push what they make out of one side, shown by an <B className="text-mars">orange arrow</B> and a dock on that edge. Press <K>R</K> to turn the ghost before you build (<K>Shift</K>+<K>R</K> turns the other way), or press <K>R</K> over a built machine to turn it.
+          </P>
+          <H>Paying and refunds</H>
+          <P>
+            Buildings cost <B>metal</B> and <B>bricks</B> from the core’s stores. <B>Right-click</B> a building to remove it and get the <B>full cost back</B>, upgrades included. Right-drag removes many at once. <K>Q</K> copies the building under the cursor, facing and all.
+          </P>
+          <Tip>Construction drones fly out from the core to every new building, and the rovers start visiting it. It’s all for show, but it tells you the colony is busy.</Tip>
+        </>
+      ),
+    },
+    {
+      title: 'Mining',
       kicker: 'Everything starts in the ground',
       body: (
         <>
-          <Chain art={art} steps={[{ ground: 'ice' }, { kind: 'drill' }, { item: 'ice' }]} />
-          <Chain art={art} steps={[{ ground: 'ore' }, { kind: 'excavator' }, { item: 'ore' }]} />
-          <Chain art={art} steps={[{ ground: 'sand' }, { kind: 'excavator' }, { item: 'regolith' }]} />
+          <Chain art={art} steps={[{ ground: 'ice' }, { kind: 'drill' }, { item: 'ice' }]} note="Pale blue ground is buried water ice." />
+          <Chain art={art} steps={[{ ground: 'ore' }, { kind: 'excavator' }, { item: 'ore' }]} note="Dark red ground is hematite, iron ore." />
+          <Chain art={art} steps={[{ ground: 'sand' }, { kind: 'excavator' }, { item: 'regolith' }]} note="Plain sand is regolith: crushed rock and dust." />
           <P>
-            <B>Ice drills</B> only work on pale blue ice. <B>Excavators</B> dig hematite ore from dark red ground, or regolith (dust and rock) from plain sand. Grey boulders and craters can’t be built on.
+            <B>Ice drills</B> only work on ice. <B>Excavators</B> dig ore from ore ground, or regolith from sand. A miner only needs <B>some</B> of its footprint on the right ground. On mixed ground it digs whatever covers most of it, and the inspector says what it’s mining.
           </P>
+          <P>
+            Miners need <B>power</B> to run (see the Power chapter) and somewhere to put what they dig: point their arrow at a belt or straight into a machine.
+          </P>
+          <Tip>Your landing site always has ice and ore within reach of the core’s power. Look for the blue and dark red patches nearby.</Tip>
         </>
       ),
     },
     {
-      title: '2 · Move it',
-      kicker: 'Conveyor belts are your factory’s veins',
+      title: 'Conveyor belts',
+      kicker: 'Moving things around',
       body: (
         <>
           <Chain art={art} steps={[{ kind: 'drill' }, { kind: 'belt' }, { kind: 'belt' }, { kind: 'melter' }, { kind: 'belt' }, { kind: 'core' }]} />
           <P>
-            Buildings are big: from <B>2×2</B> up to <B>4×3 tiles</B> (belts, junctions and pylons take one) — the outline under your cursor shows the footprint. Every miner and machine has an <B>orange arrow</B>: it pushes what it makes onto the tile the arrow points at. Press <B>R</B> to rotate before you build.
+            Choose the belt (<K>1</K>) and <B>drag</B> to lay a line: it follows your mouse and turns corners for you. Items ride along the belt and are pushed into whatever the belt points at.
           </P>
+          <H>Joining and crossing</H>
           <P>
-            Pick the belt (key <B>1</B>) and <B>drag</B> to lay a line — it follows your mouse. Belts feed straight into machines. Anything that reaches the <B>colony core</B> goes into your stores, and stores pay for new buildings.
+            A belt that runs into the <B>side</B> of another merges into it, making a T-junction or Y-merge, or a four-way merge with feeds from both sides. To let two lines <B>cross</B> without mixing, build a <B>junction</B> where they meet. Dragging straight across another line makes one for you.
           </P>
+          <H>Machines and the core</H>
           <P>
-            Machines with two ingredients (washer, greenhouse) take them from <B>any side</B>. Give each ingredient its own belt so one can’t block the other.
+            Belts feed straight into machines from <B>any edge</B>. Anything that reaches the <B>colony core</B> goes into your stores, which is where the HUD numbers come from and what pays for buildings.
           </P>
+          <Tip>Machines with two ingredients (the washer and greenhouse) are happiest with one belt per ingredient. A single mixed belt still works, just more slowly.</Tip>
+          <Tip tone="warn">If a machine’s output has nowhere to go, it stops with “Output blocked”. Check that its arrow points at a belt that leads somewhere.</Tip>
         </>
       ),
     },
     {
-      title: '3 · Make it',
-      kicker: 'Production chains',
+      title: 'Production chains',
+      kicker: 'Turning Mars into supplies',
       body: (
         <>
           <Chain art={art} steps={[{ item: 'ice' }, { kind: 'melter' }, { item: 'water' }]} />
           <Chain art={art} steps={[{ item: 'ore' }, { kind: 'smelter' }, { item: 'metal' }]} />
           <Chain art={art} steps={[{ item: 'regolith' }, { kind: 'kiln' }, { item: 'brick' }]} />
-          <Chain art={art} steps={[{ item: 'regolith' }, { item: 'water' }, { kind: 'washer' }, { item: 'soil' }]} />
+          <Chain art={art} steps={[{ item: 'regolith' }, { item: 'water' }, { kind: 'washer' }, { item: 'soil' }]} note="Martian soil holds toxic perchlorate salts, so it has to be washed before anything will grow in it." />
           <Chain art={art} steps={[{ item: 'soil' }, { item: 'water' }, { kind: 'greenhouse' }, { item: 'food' }]} />
+          <Table
+            head={['Machine', 'Takes', 'Makes', 'Time', 'Power']}
+            rows={machines.map((k) => {
+              const r = BUILDINGS[k].recipe!
+              return [BUILDINGS[k].name, items(r.in), items(r.out), `${r.time} s`, `${BUILDINGS[k].power} kW`]
+            })}
+          />
           <P>
-            <B>Metal</B> and <B>bricks</B> pay for buildings. Martian soil contains toxic perchlorate, so it has to be <B>washed</B> before a greenhouse can use it. <B>Research</B> (key T) makes machines faster — build a lab to speed it up.
+            <B>Metal</B> and <B>bricks</B> pay for new buildings, so a smelter and a kiln feeding the core are your first real economy. Water, food and oxygen keep the crew alive.
           </P>
         </>
       ),
     },
     {
-      title: '4 · Keep the crew alive',
-      kicker: 'Every system depends on another',
+      title: 'Keeping the crew alive',
+      kicker: 'Food, water, air, a bed, a roof',
       body: (
         <>
-          <div className="grid grid-cols-3 gap-1 text-center text-[10px]">
-            {(
-              [
-                ['food', 'Food'],
-                ['water', 'Water'],
-                ['o2', 'Oxygen'],
-              ] as const
-            ).map(([k, n]) => (
-              <div key={k} className="border-2 border-star/10 py-2">
-                <p className="text-lg text-mars">{NEEDS[k]}</p>
-                <p className="text-star/70">{n} / colonist / sol</p>
-              </div>
-            ))}
+          <Table
+            head={['Every colonist needs, per sol', 'Made by']}
+            rows={[
+              [`${NEEDS.water} water`, 'Ice melters (ice → water)'],
+              [`${NEEDS.food} food`, 'Greenhouses (washed soil + water → food)'],
+              [`${NEEDS.o2} oxygen`, 'MOXIE plants split the CO₂ air; greenhouses add a little'],
+            ]}
+          />
+          <div className="flex flex-wrap items-end justify-center gap-5">
+            <Sprite src={art.kinds.moxie} label="MOXIE · oxygen" />
+            <Sprite src={art.kinds.habitat} label={`Habitat · ${HABITAT_BEDS[0]} beds`} />
+            <Sprite src={art.kinds.shield} label="Regolith shield" />
           </div>
-          <div className="flex items-end justify-center gap-4">
-            <Sprite src={art.kinds.moxie} label="MOXIE · O₂" />
-            <Sprite src={art.kinds.habitat} label="Habitat · 4 crew" />
-            <Sprite src={art.kinds.shield} label="Shield" />
-          </div>
+          <H>Beds</H>
           <P>
-            Watch the numbers at the top: each shows your stock and how fast it’s rising or falling per sol. If anything runs out, <B>colony health</B> drops — at 0% the mission fails. Build a <B>MOXIE</B> to make oxygen from the CO₂ air.
+            The core sleeps <B>{coreBeds}</B>. Each <B>habitat</B> adds <B>{HABITAT_BEDS[0]}</B> beds ({HABITAT_BEDS[1]} and {HABITAT_BEDS[2]} when upgraded), but only while it is <B>connected to power</B>. Crew without a bed slowly lose health.
           </P>
+          <H>Radiation</H>
           <P>
-            A <B>supply ship</B> lands every 1.5 sols. It brings new crew only if there’s free housing and nothing is running out. Every <B>habitat</B> needs a <B>regolith shield</B> within {SHIELD_REACH[0]} tiles, or its crew soak up radiation.
+            Mars has no magnetic field. A habitat needs a <B>regolith shield</B> within <B>{SHIELD_REACH[0]} tiles</B> of it ({SHIELD_REACH[1]} and {SHIELD_REACH[2]} when the shield is upgraded), or its crew soak up radiation. Crew move into shielded habitats first.
           </P>
+          <H>New crew</H>
+          <P>
+            A <B>supply ship</B> lands at the core every <B>1.5 sols</B> with <B>8 metal</B>. It brings up to <B>4 new colonists</B>, but only if there are <B>free beds</B>, health is at least <B>60%</B> and nothing is running out.
+          </P>
+          <Tip>Watch the ▲/▼ rates under each stock. A small ▼ on water or food is a warning, not a crisis, as long as you build the next melter or greenhouse before it runs out.</Tip>
         </>
       ),
     },
     {
-      title: '5 · Power and hazards',
+      title: 'Power and the grid',
       kicker: 'Mars gets 43% of Earth’s sunlight',
       body: (
         <>
-          <div className="flex items-end justify-center gap-4">
-            <Sprite src={art.kinds.solar} label="Solar · 20 kW" />
-            <Sprite src={art.kinds.battery} label="Battery" />
+          <div className="flex flex-wrap items-end justify-center gap-5">
+            <Sprite src={art.kinds.solar} label={`Solar · ${SOLAR_KW[0]} kW`} />
+            <Sprite src={art.kinds.battery} label="Battery bank" />
+            <Sprite src={art.kinds.pylon} label="Power pylon" />
+            <Sprite src={art.kinds.reactor} label={`Reactor · ${REACTOR_KW[0]} kW`} />
           </div>
+          <H>Making power</H>
           <P>
-            Power travels by <B>grid</B>: only buildings inside the core’s or a <B>pylon’s</B> square are connected, and pylons link by cable (press <B>P</B> to see it). Solar only works by day, so store the surplus in <B>batteries</B>. When power runs short, <B>life support comes first</B> and the factories slow down. Upgrade buildings with <B>U</B> — a solar station even plants its own panels.
+            A <B>solar panel</B> makes up to <B>{SOLAR_KW[0]} kW</B> at noon, less at dawn and dusk, and nothing at night. <B>Batteries</B> store daytime surplus ({BATTERY_KJ_LEVEL[0].toLocaleString('en')} kJ each) to carry you through the dark. After research, the <B>Kilopower reactor</B> gives a steady {REACTOR_KW[0]} kW day and night.
           </P>
+          <H>The grid</H>
           <P>
-            <B className="text-[#e0a072]">Dust storms</B> cut solar output for half a sol. <B className="text-[#ff7a6e]">Solar flares</B> blast unshielded habitats with radiation. You get a warning before each one — check the log.
+            Power only reaches buildings that are <B>connected</B>. The core powers everything within <B>{CORE_REACH} tiles</B>. A <B>pylon</B> powers everything within {PYLON_REACH[0]} tiles of it, and links by cable to the core or another pylon up to {PYLON_LINK[0]} tiles away (the core reaches {CORE_LINK}). Unconnected buildings show <B className="text-[#ff7a6e]">Not connected</B>. Press <K>P</K> to see the grid’s coverage on the map.
+          </P>
+          <H>When there isn’t enough</H>
+          <P>
+            <B>Life support comes first</B>: the core, habitats and MOXIE get power before industry. The factories slow down, but the crew keep breathing. The power panel (click the power readout) shows who uses what.
+          </P>
+          <Tip>Build a battery before your first night. The “Night shift” mission is there to remind you.</Tip>
+        </>
+      ),
+    },
+    {
+      title: 'Upgrades and research',
+      kicker: 'Getting better at everything',
+      body: (
+        <>
+          <H>Upgrades</H>
+          <P>
+            Select a building and press <K>U</K> (or the upgrade button in the inspector) to take it up to <B>level {MAX_LEVEL}</B>. Machines work <B>{Math.round((SPEED[1] - 1) * 100)}%</B> and then <B>{Math.round((SPEED[2] - 1) * 100)}%</B> faster but use more power. You can see the new parts bolted on.
+          </P>
+          <Table
+            head={['Building', 'Level 2', 'Level 3']}
+            rows={(['solar', 'battery', 'pylon', 'habitat', 'shield', 'reactor'] as Kind[]).map((k) => {
+              const u = UPGRADES[k]!
+              return [u.names[0], `${u.names[1]}: ${u.gains[0]}`, `${u.names[2]}: ${u.gains[1]}`]
+            })}
+          />
+          <P>
+            A level-3 <B>solar station</B> keeps planting new panels around itself, up to {STATION_MAX_PLANTS}, wherever there’s room on the grid.
+          </P>
+          <H>Research</H>
+          <P>
+            Open research with <K>T</K> and pick a project. The core researches slowly on its own; every connected <B>lab</B> adds much more.
+          </P>
+          <Table head={['Project', 'Cost', 'Effect']} rows={RESEARCH.map((r) => [r.name, `${r.cost} RP`, r.effect])} />
+        </>
+      ),
+    },
+    {
+      title: 'Storms, flares and rovers',
+      kicker: 'Living with Mars',
+      body: (
+        <>
+          <H>Dust storms</H>
+          <P>
+            Every few sols a <B className="text-[#e0a072]">dust storm</B> rolls in for about half a sol. Solar panels lose most of their output, so stored power and reactors carry the colony. The “Self-cleaning panels” research halves the loss.
+          </P>
+          <H>Solar flares</H>
+          <P>
+            A <B className="text-[#ff7a6e]">solar flare</B> floods the surface with radiation for a short time. Crew outside head in, and anyone in an unshielded habitat takes heavy damage. Shield every habitat before the first one.
+          </P>
+          <P>You always get a warning in the mission log before each storm or flare.</P>
+          <H>Drones, rovers and roads</H>
+          <P>
+            <B>Drones</B> build and upgrade from pads on the core. AI-driven <B>rovers</B> haul ore between your buildings and the core, and crew walk out to work by day. Their traffic wears <B>tyre tracks</B> into the ground, and busy routes turn into <B>roads</B> that the drones pave. Rovers drive faster on roads.
           </P>
         </>
       ),
     },
     {
-      title: 'Controls',
+      title: 'Your first sols',
+      kicker: 'A good opening',
+      body: (
+        <>
+          <ol className="list-decimal space-y-2.5 pl-6 font-sans text-[15px] normal-case leading-relaxed text-star/90 marker:font-pixel marker:text-mars">
+            <li>
+              Build <B>two solar panels</B> (<K>7</K>) close to the core. Everything else needs power.
+            </li>
+            <li>
+              Put an <B>ice drill</B> (<K>2</K>) on a blue patch and belt it into an <B>ice melter</B> (<K>4</K>), then belt the melter’s water into the core.
+            </li>
+            <li>
+              Add a <B>battery</B> before dark, and a <B>pylon</B> if the ice or ore is outside the core’s reach.
+            </li>
+            <li>
+              Dig ore with an <B>excavator</B> (<K>3</K>) into a <B>smelter</B> (<K>5</K>) for metal, and regolith into a <B>kiln</B> (<K>6</K>) for bricks. Now you can afford anything.
+            </li>
+            <li>
+              Build a <B>MOXIE</B> (<K>0</K>) for oxygen, then a <B>soil washer</B> feeding a <B>greenhouse</B> for food.
+            </li>
+            <li>
+              Add <B>habitats</B> (<K>8</K>) with <B>shields</B> (<K>9</K>) beside them so supply ships can land new crew, and a <B>lab</B> to speed up research.
+            </li>
+          </ol>
+          <Tip>Speed up time with the 2× and 3× buttons while you wait for stock to build up, and pause with <K>Space</K> whenever you need to think.</Tip>
+        </>
+      ),
+    },
+    {
+      title: 'All controls',
       kicker: 'Mouse, keyboard or touch',
       body: (
-        <dl className="grid gap-1 text-[10px]">
-          {(
+        <Table
+          head={['Input', 'Does']}
+          rows={[
+            ['Click', 'Build the selected building, or select a building to inspect it'],
+            ['Drag', 'Lay belts in a line; pans the map when nothing is selected'],
+            ['Right-click · right-drag', 'Remove a building (full refund) · remove many'],
             [
-              ['Click', 'Build the selected module, or select a building to inspect'],
-              ['Drag', 'Lay belts in a line · pan the map when nothing is selected'],
-              ['Right-click', 'Remove a building — full refund. Drag to remove many'],
-              ['R · Shift+R', 'Rotate the build direction (or the building under the cursor)'],
-              ['Q', 'Copy the building under the cursor'],
-              ['U', 'Upgrade the selected building (up to level 3)'],
-              ['P', 'Power view: grid coverage and unconnected buildings'],
-              ['1 – 0', 'Quick-select belt, drill, excavator, melter, smelter, kiln, solar, habitat, shield, MOXIE'],
-              ['WASD · arrows', 'Pan · mouse wheel or + / − to zoom · C jumps to the core'],
-              ['Space', 'Pause · 1× 2× 3× buttons change speed'],
-              ['T · H · Esc', 'Research · this guide · menu / cancel'],
-            ] as const
-          ).map(([k, v]) => (
-            <div key={k} className="flex gap-3 border-b border-star/10 pb-1">
-              <dt className="w-24 shrink-0 text-mars">{k}</dt>
-              <dd className="font-sans text-[12px] normal-case text-star/85">{v}</dd>
-            </div>
-          ))}
-        </dl>
+              <>
+                <K>R</K> · <K>Shift</K>+<K>R</K>
+              </>,
+              'Rotate the build ghost, or the building under the cursor',
+            ],
+            [<K key="q">Q</K>, 'Copy the building under the cursor'],
+            [<K key="u">U</K>, `Upgrade the selected building (up to level ${MAX_LEVEL})`],
+            [<K key="p">P</K>, 'Power view: grid coverage and unconnected buildings'],
+            [
+              <>
+                <K>1</K>–<K>0</K>
+              </>,
+              (Object.entries(HOTKEYS) as [Kind, string][]).map(([k, key]) => `${key} ${BUILDINGS[k].short}`).join(' · '),
+            ],
+            [
+              <>
+                <K>W</K>
+                <K>A</K>
+                <K>S</K>
+                <K>D</K> · arrows
+              </>,
+              'Pan the map · mouse wheel or + / − to zoom · C jumps to the core',
+            ],
+            [<K key="sp">Space</K>, 'Pause and resume · the 1× 2× 3× buttons set the speed'],
+            [
+              <>
+                <K>T</K> · <K>H</K> · <K>Esc</K>
+              </>,
+              'Research · this guide · close / cancel / menu',
+            ],
+            ['Touch', 'Tap to build or select · drag to pan · pinch to zoom'],
+          ]}
+        />
       ),
     },
   ]
 }
+
+/* ----------------------------------- dialog ----------------------------------- */
 
 export function HowToPlay({ onClose, doneLabel = 'Got it', closeable = true }: { onClose: () => void; doneLabel?: string; closeable?: boolean }) {
   const art = useMemo<Art>(
@@ -213,10 +480,16 @@ export function HowToPlay({ onClose, doneLabel = 'Got it', closeable = true }: {
     }),
     [],
   )
-  const list = useMemo(() => pages(art), [art])
+  const list = useMemo(() => chapters(art), [art])
   const [n, setN] = useState(0)
   const last = n === list.length - 1
   const page = list[n]
+  const scroller = useRef<HTMLDivElement>(null)
+
+  // every chapter starts at its top
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: 0 })
+  }, [n])
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -231,47 +504,73 @@ export function HowToPlay({ onClose, doneLabel = 'Got it', closeable = true }: {
   }, [list.length])
 
   return (
-    <div className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-[#0c1220]/75 p-3 font-pixel uppercase text-star sm:p-6" onClick={closeable ? onClose : undefined}>
+    <div className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-[#0c1220]/80 p-2 font-pixel uppercase text-star sm:p-6" onClick={closeable ? onClose : undefined}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="How to play"
         onClick={(e) => e.stopPropagation()}
-        className="rise flex max-h-full w-full max-w-xl flex-col border-2 border-mars bg-[#0c1220] shadow-[6px_6px_0_#b75c42]"
+        className="rise flex h-full max-h-[52rem] w-full max-w-5xl flex-col border-2 border-mars bg-[#0c1220] shadow-[6px_6px_0_#b75c42]"
       >
-        <div className="flex items-center justify-between gap-3 border-b-2 border-star/10 px-4 py-2.5 text-[10px]">
-          <span className="text-star/60">
-            How to play · {n + 1}/{list.length}
+        <div className="flex items-center justify-between gap-3 border-b-2 border-star/10 px-4 py-3 text-[12px] sm:px-5">
+          <span className="text-mars">RENOVA field manual</span>
+          <span className="flex items-center gap-4">
+            <span className="text-star/60">
+              {n + 1} / {list.length}
+            </span>
+            {closeable && (
+              <button type="button" onClick={onClose} className="text-base text-star/60 hover:text-mars" aria-label="Close guide">
+                ✕
+              </button>
+            )}
           </span>
-          {closeable && (
-            <button type="button" onClick={onClose} className="text-star/60 hover:text-mars" aria-label="Close guide">
-              ✕
-            </button>
-          )}
         </div>
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-5">
-          <div>
-            <p className="text-[10px] text-sand/70">{page.kicker}</p>
-            <h2 className="mt-1 font-pixel text-lg text-mars sm:text-xl">{page.title}</h2>
+
+        <div className="flex min-h-0 flex-1">
+          {/* chapter list: jump to any topic */}
+          <nav aria-label="Chapters" className="hidden w-56 shrink-0 overflow-y-auto border-r-2 border-star/10 py-2 md:block">
+            {list.map((c, k) => (
+              <button
+                key={c.title}
+                type="button"
+                onClick={() => setN(k)}
+                aria-current={k === n ? 'page' : undefined}
+                className={`flex w-full items-baseline gap-2 px-4 py-2 text-left text-[11px] leading-snug transition-colors ${k === n ? 'bg-mars/15 text-mars' : 'text-star/65 hover:bg-star/5 hover:text-star'}`}
+              >
+                <span className="w-5 shrink-0 text-right text-star/40">{k + 1}</span>
+                <span>{c.title}</span>
+              </button>
+            ))}
+          </nav>
+
+          <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8">
+            <div className="mx-auto max-w-3xl space-y-4">
+              <div>
+                <p className="text-[12px] text-sand/80">{page.kicker}</p>
+                <h2 className="mt-1.5 font-pixel text-2xl text-mars sm:text-3xl">{page.title}</h2>
+              </div>
+              {page.body}
+            </div>
           </div>
-          {page.body}
         </div>
-        <div className="flex items-center justify-between gap-2 border-t-2 border-star/10 px-4 py-3 text-[11px]">
-          <button type="button" onClick={() => setN(n - 1)} disabled={n === 0} className="border-2 border-star/30 px-3 py-2 transition-colors hover:border-mars hover:text-mars disabled:invisible">
+
+        <div className="flex items-center justify-between gap-2 border-t-2 border-star/10 px-4 py-3 text-[13px] sm:px-5">
+          <button type="button" onClick={() => setN(n - 1)} disabled={n === 0} className="border-2 border-star/30 px-4 py-2.5 transition-colors hover:border-mars hover:text-mars disabled:invisible">
             ◀ Back
           </button>
-          <div className="flex gap-1.5" aria-hidden>
+          <div className="flex gap-1.5 md:hidden" aria-hidden>
             {list.map((_, k) => (
-              <button key={k} type="button" tabIndex={-1} onClick={() => setN(k)} className={`h-2 w-2 ${k === n ? 'bg-mars' : 'bg-star/25 hover:bg-star/50'}`} />
+              <button key={k} type="button" tabIndex={-1} onClick={() => setN(k)} className={`h-2.5 w-2.5 ${k === n ? 'bg-mars' : 'bg-star/25 hover:bg-star/50'}`} />
             ))}
           </div>
+          <span className="hidden text-[11px] text-star/40 md:block">← → to turn pages</span>
           <button
             type="button"
             autoFocus
             onClick={() => (last ? onClose() : setN(n + 1))}
-            className="border-2 border-mars bg-mars px-3 py-2 text-navy transition-colors hover:border-star hover:bg-star"
+            className="border-2 border-mars bg-mars px-4 py-2.5 text-navy transition-colors hover:border-star hover:bg-star"
           >
-            {last ? doneLabel : 'Next ▶'}
+            {last ? doneLabel : `Next: ${list[n + 1].title} ▶`}
           </button>
         </div>
       </div>

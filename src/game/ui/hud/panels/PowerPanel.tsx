@@ -24,23 +24,23 @@ export function PowerPanel({ store }: { store: GameStore }) {
       <div className="grid gap-2 sm:grid-cols-3">
         <div className="border border-[#3F4246] bg-[#151618]/60 p-2">
           <p className={TONE.label}>Generating</p>
-          <p className={`text-lg ${TONE.cyan}`}>{Math.round(P.gen)} kW</p>
-          <p className="font-sans text-[11px] normal-case text-[#BFBFBF]">
+          <p className={`text-2xl ${TONE.cyan}`}>{Math.round(P.gen)} kW</p>
+          <p className="font-sans text-[13px] normal-case text-[#BFBFBF]">
             Solar {Math.round(P.solarGen)} · Reactor {Math.round(P.reactorGen)}
           </p>
         </div>
         <div className="border border-[#3F4246] bg-[#151618]/60 p-2">
           <p className={TONE.label}>Using</p>
-          <p className={`text-lg ${P.gen < P.demand ? TONE.warn : 'text-white'}`}>{Math.round(P.demand)} kW</p>
-          <p className="font-sans text-[11px] normal-case text-[#BFBFBF]">{P.discharge > 0.5 ? `Batteries supplying ${Math.round(P.discharge)} kW` : 'Running on generation'}</p>
+          <p className={`text-2xl ${P.gen < P.demand ? TONE.warn : 'text-white'}`}>{Math.round(P.demand)} kW</p>
+          <p className="font-sans text-[13px] normal-case text-[#BFBFBF]">{P.discharge > 0.5 ? `Batteries supplying ${Math.round(P.discharge)} kW` : 'Running on generation'}</p>
         </div>
         <div className="border border-[#3F4246] bg-[#151618]/60 p-2">
           <p className={`flex items-center gap-1 ${TONE.label}`}>
-            <Icon name="battery" size={12} /> Stored
+            <Icon name="battery" size={16} /> Stored
           </p>
-          <p className="text-lg text-white">{Math.floor((P.stored / reserve) * 100)}%</p>
+          <p className="text-2xl text-white">{Math.floor((P.stored / reserve) * 100)}%</p>
           <Bar value={P.stored / reserve} color="#65C9E8" />
-          <p className="mt-1 font-sans text-[11px] normal-case text-[#BFBFBF]">
+          <p className="mt-1 font-sans text-[13px] normal-case text-[#BFBFBF]">
             {fmt(P.stored)} / {fmt(reserve)} kJ
           </p>
         </div>
@@ -48,7 +48,7 @@ export function PowerPanel({ store }: { store: GameStore }) {
 
       {/* history: generation, demand and battery charge over the last few sols */}
       <div className="mt-3 border border-[#3F4246] bg-[#151618] p-2">
-        <p className="flex flex-wrap gap-3 text-[9px]">
+        <p className="flex flex-wrap gap-3 text-[11px]">
           <span className={TONE.cyan}>━ Generation</span>
           <span className="text-[#C8754D]">━ Demand</span>
           <span className="text-[#F4D03F]">┅ Battery charge</span>
@@ -72,18 +72,18 @@ export function PowerPanel({ store }: { store: GameStore }) {
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
           <p className={`mb-1 ${TONE.label}`}>Priority</p>
-          <p className="flex items-center justify-between gap-2 font-sans text-[11px] normal-case">
+          <p className="flex items-center justify-between gap-2 font-sans text-[13px] normal-case">
             <span>Life support (core, habitats, MOXIE)</span>
             <span className={P.lifeSat < 0.99 ? TONE.bad : TONE.good}>{Math.round(P.lifeSat * 100)}%</span>
           </p>
           <Bar value={P.lifeSat} color="#7BA750" className="mb-1.5 mt-0.5" />
-          <p className="flex items-center justify-between gap-2 font-sans text-[11px] normal-case">
+          <p className="flex items-center justify-between gap-2 font-sans text-[13px] normal-case">
             <span>Industry</span>
             <span className={P.indSat < 0.99 ? TONE.warn : TONE.good}>{Math.round(P.indSat * 100)}%</span>
           </p>
           <Bar value={P.indSat} color="#C8754D" className="mt-0.5" />
           <p className={`mt-2 ${TONE.label}`}>Sources</p>
-          <ul className="mt-1 space-y-0.5 font-sans text-[11px] normal-case">
+          <ul className="mt-1 space-y-0.5 font-sans text-[13px] normal-case">
             <li>Solar · {count('solar')} on the grid · {P.solar.toFixed(1)} kW per panel now</li>
             <li>Reactors · {count('reactor')}</li>
             <li>Batteries · {count('battery')}</li>
@@ -91,7 +91,7 @@ export function PowerPanel({ store }: { store: GameStore }) {
         </div>
         <div>
           <p className={`mb-1 ${TONE.label}`}>Biggest users</p>
-          <ul className="space-y-0.5 font-sans text-[11px] normal-case">
+          <ul className="space-y-0.5 font-sans text-[13px] normal-case">
             {users.length ? (
               users.slice(0, 7).map(([k, kw]) => (
                 <li key={k} className="flex items-center justify-between gap-2">
@@ -104,13 +104,13 @@ export function PowerPanel({ store }: { store: GameStore }) {
             )}
           </ul>
           {offGrid.length > 0 && (
-            <p className={`mt-2 flex gap-1.5 border border-[#B03E53] p-1.5 font-sans text-[11px] normal-case ${TONE.bad}`}>
-              <Icon name="warn" size={14} />
+            <p className={`mt-2 flex gap-1.5 border border-[#B03E53] p-1.5 font-sans text-[13px] normal-case ${TONE.bad}`}>
+              <Icon name="warn" size={18} />
               {offGrid.length} building{offGrid.length === 1 ? ' is' : 's are'} not connected. Build power pylons to reach them.
             </p>
           )}
           <button type="button" className={`${btn} mt-2 ${store.ui.powerView ? btnOn : ''}`} onClick={() => store.togglePowerView()}>
-            <Icon name="power" size={14} /> {store.ui.powerView ? 'Hide' : 'Show'} grid coverage · P
+            <Icon name="power" size={18} /> {store.ui.powerView ? 'Hide' : 'Show'} grid coverage · P
           </button>
         </div>
       </div>

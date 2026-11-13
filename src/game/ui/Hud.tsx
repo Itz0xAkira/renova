@@ -33,7 +33,7 @@ export function Hud({ store }: { store: GameStore }) {
   const blocked = !!ui.panel || !!popup
 
   return (
-    <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-2 p-2 text-[10px] uppercase text-[#D9D9D9] sm:p-3">
+    <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-2.5 p-2 text-[12px] uppercase text-[#D9D9D9] sm:p-4">
       <TopBar store={store} />
       <div className="flex min-h-0 flex-1 flex-col items-start justify-between gap-2 sm:flex-row">
         <Missions store={store} />
@@ -42,7 +42,7 @@ export function Hud({ store }: { store: GameStore }) {
       <BottomBar store={store} thumbs={thumbs} />
       {!blocked && <CursorHint store={store} />}
       {ui.paused && !blocked && (
-        <p className={`${panel} pointer-events-none absolute left-1/2 top-1/3 flex -translate-x-1/2 items-center gap-2 border-[#C8754D] px-4 py-2 text-xs text-white`}>
+        <p className={`${panel} pointer-events-none absolute left-1/2 top-1/3 flex -translate-x-1/2 items-center gap-2 border-[#C8754D] px-4 py-2 text-sm text-white`}>
           <Icon name="pause" /> Paused · space to resume
         </p>
       )}

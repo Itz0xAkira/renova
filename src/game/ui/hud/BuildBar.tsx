@@ -12,36 +12,36 @@ export function BuildCard({ store, def }: { store: GameStore; def: BuildingDef }
   const dirs = ['↘', '↙', '↖', '↗']
   const locked = !sim.unlocked(def.kind)
   return (
-    <div className={`${panel} max-w-md border-t-2 border-t-[#C8754D] p-2.5`}>
-      <p className="flex flex-wrap items-center gap-2 text-xs text-white">
+    <div className={`${panel} max-w-xl border-t-2 border-t-[#C8754D] p-2.5`}>
+      <p className="flex flex-wrap items-center gap-2 text-sm text-white">
         {def.name}
-        <span className="border border-[#3F4246] px-1 text-[8px] text-[#8A8A8A]">
+        <span className="border border-[#3F4246] px-1 text-[10px] text-[#8A8A8A]">
           {def.w}×{def.h}
         </span>
-        <span className="ml-auto inline-flex items-center gap-2 text-[10px]">
+        <span className="ml-auto inline-flex items-center gap-2 text-[12px]">
           <Cost def={def} poor={!sim.affordable(def.kind)} />
           {def.power > 0 && (
             <span className="inline-flex items-center gap-0.5 text-[#BFBFBF]">
-              <Icon name="power" size={12} />
+              <Icon name="power" size={16} />
               {def.power}kW
             </span>
           )}
           {def.gen && (
             <span className={`inline-flex items-center gap-0.5 ${TONE.cyan}`}>
-              <Icon name="power" size={12} />+{def.gen}kW
+              <Icon name="power" size={16} />+{def.gen}kW
             </span>
           )}
         </span>
       </p>
-      <p className="mt-1 font-sans text-[12px] normal-case leading-snug text-[#D9D9D9]">{def.desc}</p>
+      <p className="mt-1 font-sans text-[14px] normal-case leading-snug text-[#D9D9D9]">{def.desc}</p>
       {(def.recipe || def.mines) && (
-        <p className="mt-1.5 font-sans text-[11px] normal-case">
+        <p className="mt-1.5 font-sans text-[13px] normal-case">
           <Recipe def={def} />
         </p>
       )}
       {locked && (
         <p className={`mt-1.5 flex items-center gap-1.5 ${TONE.warn}`}>
-          <Icon name="lock" size={12} /> Research {RESEARCH.find((r) => r.id === def.research)?.name}
+          <Icon name="lock" size={16} /> Research {RESEARCH.find((r) => r.id === def.research)?.name}
         </p>
       )}
       {ui.tool === def.kind && (
@@ -73,10 +73,10 @@ export function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<
             +
           </button>
           <button type="button" className={`${btn} ${ui.powerView ? btnOn : ''}`} onClick={() => store.togglePowerView()} aria-pressed={ui.powerView} title="Power view · P">
-            <Icon name="power" size={14} /> Grid · P
+            <Icon name="power" size={18} /> Grid · P
           </button>
           <button type="button" className={btn} onClick={() => (store.centerRequest = true)}>
-            <Icon name="crew" size={14} /> Core · C
+            <Icon name="crew" size={18} /> Core · C
           </button>
         </div>
       </div>
@@ -86,8 +86,8 @@ export function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<
           if (!kinds.length) return null
           return (
             <div key={cat.id} className="flex flex-col border-r border-[#3F4246] last:border-r-0">
-              <p className="flex items-center gap-1 px-1.5 pt-1 text-[8px] text-[#8A8A8A]">
-                <Icon name={cat.icon} size={10} /> {cat.name}
+              <p className="flex items-center gap-1 px-1.5 pt-1 text-[10px] text-[#8A8A8A]">
+                <Icon name={cat.icon} size={13} /> {cat.name}
               </p>
               <div className="flex gap-1 p-1">
                 {kinds.map((k) => {
@@ -108,20 +108,20 @@ export function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<
                       onMouseLeave={() => setPeek(null)}
                       onFocus={() => setPeek(k)}
                       onBlur={() => setPeek(null)}
-                      className={`relative flex w-[4.4rem] shrink-0 flex-col items-center border px-1 pb-1 pt-0.5 transition-colors ${
+                      className={`relative flex w-[5.6rem] shrink-0 flex-col items-center border px-1 pb-1 pt-0.5 transition-colors ${
                         sel ? 'border-[#C8754D] bg-[#A95738]/30 shadow-[inset_0_0_0_1px_#D58B59]' : 'border-[#3F4246] bg-[#2E3033] hover:border-[#8A8A8A]'
                       } ${locked ? 'cursor-not-allowed opacity-40' : ''}`}
                     >
-                      {HOTKEYS[k] && <span className="absolute left-1 top-0.5 text-[8px] text-[#8A8A8A]">{HOTKEYS[k]}</span>}
+                      {HOTKEYS[k] && <span className="absolute left-1 top-0.5 text-[10px] text-[#8A8A8A]">{HOTKEYS[k]}</span>}
                       {(d.w > 1 || d.h > 1) && (
-                        <span className="absolute right-0.5 top-0.5 bg-[#151618] px-0.5 text-[7px] text-[#65C9E8]">
+                        <span className="absolute right-0.5 top-0.5 bg-[#151618] px-0.5 text-[9px] text-[#65C9E8]">
                           {d.w}×{d.h}
                         </span>
                       )}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={thumbs[k]} alt="" width={40} height={48} className="pixelated h-12 w-10" />
-                      <span className="text-[9px] leading-tight text-white">{d.short}</span>
-                      <span className="mt-0.5 text-[8px] leading-none">{locked ? <Icon name="lock" size={10} /> : <Cost def={d} poor={poor} />}</span>
+                      <img src={thumbs[k]} alt="" width={40} height={48} className="pixelated h-16 w-[3.35rem]" />
+                      <span className="text-[11px] leading-tight text-white">{d.short}</span>
+                      <span className="mt-0.5 text-[10px] leading-none">{locked ? <Icon name="lock" size={13} /> : <Cost def={d} poor={poor} />}</span>
                     </button>
                   )
                 })}
