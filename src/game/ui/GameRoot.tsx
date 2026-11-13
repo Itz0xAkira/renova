@@ -25,8 +25,19 @@ export default function GameRoot() {
     const release = store.claimSave();
     // Start the game on the next frame: under React StrictMode the first, throwaway mount is
     // cleaned up before then, so it never builds a second Phaser canvas.
+    // WebGL can't make a 0×0 framebuffer, so if the container has no size yet (a tab that
+    // is still opening, a collapsed pane) wait until it gets one before booting.
     let game: Phaser.Game | null = null;
-    const boot = requestAnimationFrame(() => {
+    let frame = 0;
+    const el = host.current!;
+    const sized = () => el.clientWidth > 0 && el.clientHeight > 0;
+    const watch = new ResizeObserver(() => {
+      if (!game && !frame && sized()) frame = requestAnimationFrame(start);
+    });
+    const start = () => {
+      frame = 0;
+      if (game || !sized()) return;
+      watch.disconnect();
       game = new Phaser.Game({
         type: Phaser.AUTO,
         parent: host.current!,
@@ -37,7 +48,9 @@ export default function GameRoot() {
         input: { mouse: { preventDefaultWheel: true } },
         scene: [new MarsScene(store)],
       });
-    });
+    };
+    if (sized()) frame = requestAnimationFrame(start);
+    watch.observe(el);
     // a lost colony isn't written back, so reloading can't undo the loss screen into a playable dying colony
     const save = () => {
       if (store.sim.over !== "lost") store.save();
@@ -52,7 +65,8 @@ export default function GameRoot() {
       window.removeEventListener("beforeunload", save);
       document.removeEventListener("visibilitychange", vis);
       release();
-      cancelAnimationFrame(boot);
+      cancelAnimationFrame(frame);
+      watch.disconnect();
       game?.destroy(true);
       delete debug.__renova;
     };

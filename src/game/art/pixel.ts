@@ -260,7 +260,8 @@ export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P
   const frontX = cx + (w - h) * 8
   const rx = (w + h) * 8 + 1
   const ry = (w + h) * 4 + 2
-  const M = RAMP.metal
+  // a sintered-regolith concrete pad: warm grey, dusty toward the edges
+  const M = RAMP.stone
   for (let py = cy - ry - P; py <= cy + ry; py++)
     for (let px = cx - rx; px <= cx + rx; px++) {
       const top = at(px, py + P)
@@ -271,7 +272,12 @@ export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P
         let c: string
         if (edge) c = M[4]
         else if (ring) c = du + dv < 0 ? trim[3] : trim[2]
-        else c = (px + py * 2) % 6 === 0 ? M[1] : tone(M, 0.62 - (du + dv) * 0.05, px, py)
+        else {
+          // slab joints every tile, and red dust drifting in from the rim
+          const joint = Math.abs(((du + w / 2) % 1) - 0.5) > 0.47 || Math.abs(((dv + h / 2) % 1) - 0.5) > 0.47
+          const rim = Math.max(Math.abs(du) / (w / 2), Math.abs(dv) / (h / 2))
+          c = joint ? M[2] : rim > 0.8 && (px * 7 + py * 3) % 5 === 0 ? RAMP.regolith[3] : tone(M, 0.7 - (du + dv) * 0.04, px, py)
+        }
         rect(ctx, px, py, 1, 1, c)
         continue
       }

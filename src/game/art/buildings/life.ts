@@ -1,5 +1,9 @@
 /**
- * Life support: the MOXIE oxygen plant, habitat, regolith shield and greenhouse.
+ * Life support: the MOXIE oxygen plant, habitat, regolith shield and greenhouse,
+ * in the expedition style: off-white composite and fabric pressure hulls, light
+ * grey structure, safety-orange stripes and hatches, gold MLI foil, dark solar
+ * cells, small red/green status lamps and warm-lit windows, with red regolith
+ * dust creeping up every wall.
  *
  * Each function draws one building on ground point (x, y), the centre of its
  * footprint. A w×h footprint spans ±(w+h)·8 px across and ±(w+h)·4 px down.
@@ -8,11 +12,11 @@
  * The buildings are modelled in footprint space with the small z-buffered
  * renderer below (`Iso`): u runs down-right, v down-left (both in tiles from
  * the footprint centre), z up in px. Left (+v) faces are lit, right (+u) faces
- * shaded. base.ts uses the same renderer for the core and the lab.
+ * shaded. base.ts uses the same renderer and palette for the core and the lab.
  */
 import { rect, type Ctx } from '@/site/pixel/engine'
 import { getTier, GLOW, INK, plinth, RAMP, signboard, tone, trefoil, ventPx, type Ramp } from '@/game/art/pixel'
-import { antennas, puffs, M, MH, R, S, CY, SG, SOIL, STEAM } from '@/game/art/buildings/kit'
+import { puffs, M, MH, R, CY, SG, STEAM } from '@/game/art/buildings/kit'
 
 /* ------------------------- a small iso renderer ------------------------- */
 
@@ -401,119 +405,281 @@ export const roofFan =
     return Math.abs(Math.sin(ang * 2)) > 0.8 ? M[3] : INK
   }
 
+/* ------------------------- the expedition palette ------------------------ */
+
+/** Off-white composite panels and pressure hulls: RAMP.hull lifted a step, so faces read white rather than grey. */
+export const WH: Ramp = ['#77707f', '#a8a1ad', '#d3cdcd', '#efebe4', '#fdfbf6']
+/** Neutral light grey: frames, struts, light structure. */
+export const NE = RAMP.neutral
+/** Safety orange: stripes, handrails, hatch frames. */
+export const OR = RAMP.orange
+/** Gold MLI foil. */
+export const AU = RAMP.gold
+/** Deep-blue solar cells. */
+export const NV = RAMP.navy
+/** Red-orange regolith dust. */
+export const REG = RAMP.regolith
+/** Woven sandbag cloth. */
+export const BAG: Ramp = ['#6b4a3c', '#9c7a62', '#c4a585', '#dfc7a8', '#f1e4d0']
+/** Webbing straps. */
+export const STRAP = RAMP.stone
+/** Pink-white LED grow light. */
+export const PINK: Ramp = ['#4a1d3e', '#8a3270', '#cf5aa6', '#f39ad2', '#ffdcf1']
+/** Status lamps: [core, halo] when on, and the unlit lens. */
+export const LAMP = {
+  red: ['#ff5a48', '#8f2f3f'],
+  green: ['#7dff8a', '#2f7a3a'],
+  amber: ['#ffc65a', '#a0601c'],
+  redOff: '#5a2226',
+  greenOff: '#24452c',
+  amberOff: '#5a4220',
+} as const
+const OFF = { red: LAMP.redOff, green: LAMP.greenOff, amber: LAMP.amberOff }
+/** Stencil ink on white panels. */
+const STEN = '#4a4450'
+const STEN_D = '#38333e'
+/** Dark slot in a vent. */
+const SLOT = '#2f2b36'
+
+const BAY = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((n) => (n + 0.5) / 16)
+/** Ordered-dither threshold (0–1) at a pixel. */
+export const bay = (x: number, y: number) => BAY[(y & 3) * 4 + (x & 3)]
+/** A stable pseudo-random number (0–1) for a pixel. */
+export const hash = (x: number, y: number) => {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263)
+  h = Math.imul(h ^ (h >>> 13), 1274126177)
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+}
+
+/**
+ * Regolith dust at height fraction hf (0 = ground, 1 = top) on pixel (x, y) of
+ * brightness l, or null above the dust line `frac`. It thickens toward the ground.
+ */
+export function dustPx(hf: number, frac: number, x: number, y: number, l: number) {
+  const f = 1 - hf / frac
+  if (f <= 0) return null
+  if (f * f * 1.25 < bay(x, y) * 0.8 + hash(x, y) * 0.3) return null
+  return tone(REG, l * 0.8 + (f > 0.75 ? 0.02 : 0.12), x + 1, y)
+}
+/** Dust creeping up the bottom `frac` of a box face. */
+export const dust =
+  (side: 'l' | 'r' = 'l', frac = 0.28): Pat =>
+  (c, r, _w, h) =>
+    dustPx(1 - (r + 0.5) / h, frac, c * 3 + r, r * 5 + c, side === 'l' ? 0.72 : 0.42)
+/** Composite panel joints: every p columns, plus an optional row j (no rivets). */
+export const panels =
+  (p: number, side: 'l' | 'r', j = -1): Pat =>
+  (c, r) =>
+    (c > 0 && c % p === 0) || r === j ? (side === 'l' ? WH[1] : WH[0]) : null
+/** A safety-orange stripe. */
+export const orange = (side: 'l' | 'r' = 'l') => (side === 'l' ? OR[2] : OR[1])
+/** Stencilled lettering: two rows of dashes in dark grey, nothing in between. */
+export const stencil =
+  (seed: number, side: 'l' | 'r' = 'l'): Pat =>
+  (c, r) =>
+    (r === 0 || r === 2) && (seed >> c % 12) & 1 ? (side === 'l' ? STEN : STEN_D) : null
+/**
+ * A rounded-rectangle pressure hatch: orange frame, a dark gasket, an off-white
+ * door with a small round porthole (warm-lit, or dark) and a latch handle.
+ */
+export const hatch =
+  (side: 'l' | 'r' = 'l', lit = true): Pat =>
+  (c, r, w, h) => {
+    const ex = Math.min(c, w - 1 - c)
+    const ey = Math.min(r, h - 1 - r)
+    if (ex + ey === 0) return null
+    if (ex === 0 || ey === 0 || (ex === 1 && ey === 1)) return side === 'l' ? OR[3] : OR[1]
+    if (ex === 1 || ey === 1) return INK
+    const dx = c - (w - 1) / 2
+    const dy = r - 3.5
+    if (w >= 6 && h >= 9 && Math.abs(dx) < 1.6 && Math.abs(dy) < 1.6) {
+      if (Math.abs(dx) + Math.abs(dy) > 2.2) return side === 'l' ? WH[2] : WH[1]
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) return INK
+      return lit ? (dy < 0 ? WARM[4] : WARM[2]) : dy < 0 ? NV[3] : NV[1]
+    }
+    if (r === Math.round(h * 0.62) && ex === 2) return side === 'l' ? NE[1] : INK
+    if (side === 'l') return ex === 2 ? WH[4] : (c + r) % 7 === 0 ? WH[2] : WH[3]
+    return ex === 2 ? WH[2] : WH[1]
+  }
+/** A window with a light frame and warm interior light, or dark glass when unlit. */
+export const winW =
+  (side: 'l' | 'r' = 'l', lit = true): Pat =>
+  (c, r, w, h) => {
+    if (c === 0 || r === 0 || c === w - 1 || r === h - 1) return side === 'l' ? NE[2] : NE[1]
+    if (!lit) return r === 1 ? NV[3] : NV[1]
+    if (r === 1) return WARM[4]
+    return (c + r) % 4 === 0 ? WARM[3] : WARM[2]
+  }
+/** A louvred vent in a white panel. */
+export const vent =
+  (side: 'l' | 'r' = 'l'): Pat =>
+  (c, r, w, h) =>
+    c === 0 || c === w - 1 || r === 0 || r === h - 1 ? (side === 'l' ? WH[2] : WH[1]) : r % 2 ? SLOT : side === 'l' ? WH[3] : WH[2]
+/** Radiator panel: fine vertical coolant tubes. */
+export const radiator =
+  (side: 'l' | 'r' = 'l'): Pat =>
+  (c, r, _w, h) =>
+    r === 0 || r === h - 1 ? NE[side === 'l' ? 2 : 1] : c % 2 ? WH[side === 'l' ? 4 : 2] : WH[side === 'l' ? 2 : 1]
+/** Dark solar cells in a light frame, for a top face. */
+export const solarTop: Pat = (a, b, w, h) => {
+  if (a === 0 || b === 0 || a === w - 1 || b === h - 1) return NE[2]
+  if (a % 5 === 0 || b % 4 === 0) return NV[3]
+  return (a + b) % 9 === 0 ? NV[4] : (a * 3 + b) % 11 === 0 ? NV[2] : NV[1]
+}
+/** A round intake fan in a white housing, for a top face. */
+export const fanTop =
+  (cx: number, cy: number, rad: number, t: number): Pat =>
+  (a, b) => {
+    const dx = a + 0.5 - cx
+    const dy = b + 0.5 - cy
+    const d = Math.hypot(dx, dy)
+    if (d > rad + 0.5) return null
+    if (d > rad - 0.7) return NE[2]
+    if (d < 1) return NE[4]
+    const ang = Math.atan2(dy, dx) - t * 9
+    return Math.abs(Math.sin(ang * 2)) > 0.8 ? NE[3] : SLOT
+  }
+/** Crinkled gold MLI foil at brightness l. */
+export const foil = (l: number, x: number, y: number) => {
+  const n = hash(x >> 1, y)
+  if (n > 0.9 && l > 0.42) return AU[4]
+  if (n < 0.08) return AU[1]
+  return tone(AU, l + (n - 0.5) * 0.3, x, y)
+}
+
+/** A sagging umbilical hose from a to b (u, v, z), light grey with orange end collars. */
+export function hose(s: Iso, a: readonly [number, number, number], b: readonly [number, number, number], sag = 3, ramp: Ramp = NE) {
+  const n = 48
+  for (let k = 0; k <= n; k++) {
+    const f = k / n
+    const u = a[0] + (b[0] - a[0]) * f
+    const v = a[1] + (b[1] - a[1]) * f
+    const z = a[2] + (b[2] - a[2]) * f - sag * 4 * f * (1 - f)
+    const collar = f < 0.06 || f > 0.94
+    s.pt(u, v, z + 1, collar ? OR[3] : ramp[3])
+    s.pt(u, v, z, collar ? OR[1] : ramp[1])
+  }
+}
+/** A tiny sprite placed at (u, v, z) in the depth buffer, anchored at its bottom row, column ax. */
+export function sprite(s: Iso, u: number, v: number, z: number, rows: readonly string[], pal: Record<string, string>, ax: number) {
+  const px0 = Math.floor(s.X(u, v)) - ax
+  const py0 = Math.floor(s.Y(u, v, z)) - rows.length + 1
+  const d = u + v + z / 24 + 0.05
+  rows.forEach((row, j) => [...row].forEach((ch, i) => pal[ch] && s.put(px0 + i, py0 + j, d, pal[ch])))
+}
+/** A blinking lamp: red or green or amber, on while `on`. */
+export function status(s: Iso, u: number, v: number, z: number, col: 'red' | 'green' | 'amber', on: boolean) {
+  const [core, halo] = LAMP[col]
+  if (on) s.lamp(u, v, z, core, halo)
+  else s.pt(u, v, z, OFF[col], false, 0.06)
+}
+
 /* --------------------------------- MOXIE -------------------------------- */
 
 /**
- * MOXIE oxygen plant (2×2): the tall solid-oxide electrolysis column at the
- * back with a glowing core window, white O₂ storage tanks along the right, a
- * sand-coloured compressor house with a roof fan on the left, and a pump skid
- * with the manifold in front. Upgrades add a third tank, then roof radiators.
+ * MOXIE oxygen plant (2×2): a white solid-oxide electrolysis unit whose
+ * inspection window shows the ceramic cell stack glowing orange-hot, a CO₂
+ * intake fan on its roof and a vent; two gold-foil oxygen spheres on cradles
+ * behind it, fed by umbilical hoses through a pump skid with status lamps.
+ * Upgrades add a third sphere, then a radiator wing.
  */
 export function moxie(ctx: Ctx, x: number, y: number, t: number) {
   const tier = getTier()
   const g = plinth(ctx, x, y, 2, 2, 5)
   const s = new Iso(ctx, x, g)
   const pulse = (Math.sin(t * Math.PI * 2) + 1) / 2
-  const N = RAMP.neutral
 
-  // electrolysis column (back): gunmetal with a rust base, a ladder and a glowing core window
-  const colH = 31
-  s.vcyl(-0.5, -0.42, 9, 0, colH, M, {
-    lid: MH,
-    pat: (nx, r, H, l, px, py) => {
-      if (r >= H - 5) return r === H - 5 ? INK : tone(R, l + 0.1, px, py)
-      if (r === 4 || r === 18) return M[0]
-      if (r >= 7 && r <= 14) {
-        if (r === 7 || r === 14 || Math.abs(nx) > 0.85) return INK
-        if (Math.round(nx * 6) % 3 === 0) return M[1]
-        const hot = (r + Math.round(nx * 5) + Math.floor(t * 4)) % 5 === 0
-        return hot ? GLOW : l > 0.5 ? CY[4] : pulse > 0.5 ? CY[3] : CY[2]
-      }
-      // ladder on the lit side
-      if (nx > -0.72 && nx < -0.5 && r > 2 && r < H - 5) return Math.abs(nx + 0.61) > 0.07 ? M[4] : r % 3 === 0 ? MH[3] : null
-      return null
-    },
-  })
-  // top cap: a domed head with the feed pipe and a status lamp
-  s.ell(-0.5, -0.42, colH, 7, 4, MH, { cut: 0, spec: true })
-  s.post(-0.5, -0.42, colH + 3, colH + 8, M)
-  s.lamp(-0.5, -0.42, colH + 10, (t * 2) % 1 < 0.5 ? RAMP.veg[4] : RAMP.veg[1], RAMP.veg[0])
-  // railing ring round the cap
-  for (let k = 0; k < 24; k++) {
-    const a = (k / 24) * Math.PI * 2
-    const u = -0.5 + Math.cos(a) * 0.43
-    const v = -0.42 + Math.sin(a) * 0.43
-    s.pt(u, v, colH + 4, M[3])
-    if (k % 4 === 0) s.line(u, v, colH, u, v, colH + 4, M[2])
+  // radiator wing at the back (level 3)
+  if (tier >= 3) {
+    s.box(-0.95, -0.15, -0.97, -0.91, 6, 30, WH, { l: all(at(1, 1, 99, 22, radiator('l')), at(0, 0, 99, 1, OR[3])), r: () => NE[1], roof: NE })
+    for (const u of [-0.85, -0.25]) s.post(u, -0.94, 0, 6, NE)
   }
 
-  // O₂ storage tanks (right), white with cyan bands, domed heads
-  const tanks: [number, number, number, number][] = [
-    [0.12, -0.66, 6, 24],
-    [0.64, -0.66, 6, 21],
+  // gold-foil oxygen spheres on light cradles
+  const spheres: [number, number, number][] = [
+    [-0.48, -0.52, 9],
+    [0.42, -0.58, 9],
   ]
-  if (tier >= 2) tanks.push([0.68, -0.13, 5, 16])
-  for (const [u, v, rx, h] of tanks) {
-    s.vcyl(u, v, rx, 1, h, N, {
-      lid: false,
-      pat: (nx, r, H, l, px, py) => {
-        if (r >= 5 && r <= 7) return r === 6 && Math.abs(nx + 0.2) < 0.35 ? (l > 0.5 ? INK : M[1]) : tone(CY, l + 0.15, px, py)
-        if (r === H - 3) return M[1]
-        if (r > H - 3) return tone(M, l, px, py)
-        if (tier >= 3 && r === 10 && nx < 0.3) return GLOW
-        return null
-      },
+  if (tier >= 2) spheres.push([0.72, 0.06, 6])
+  for (const [u, v, r] of spheres) {
+    const hz = Math.round(r * 0.87)
+    const zc = hz + 3
+    const k = (r / PXT) * 0.6
+    for (const [du, dv] of [
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
+    ])
+      s.post(u + du * k, v + dv * k, 0, zc - 2, NE)
+    s.ell(u, v, zc, r, hz, AU, {
+      pat: (_nu, _nv, nz, l, px, py) => (Math.abs(nz) < 0.09 ? (l > 0.5 ? WH[4] : WH[2]) : foil(l, px, py)),
     })
-    s.ell(u, v, h, rx, 3, N, { cut: 0, spec: true })
-    s.lamp(u, v, h + 3.5, Math.floor(t * 4 + u * 3) % 4 === 0 ? ALERT[4] : ALERT[1], ALERT[0])
-    // a saddle ring and feet
-    s.box(u - 0.2, u + 0.2, v - 0.2, v + 0.2, 0, 1.5, M, { edge: false })
+    // fill valve on top
+    s.post(u, v, zc + hz - 1, zc + hz + 2, NE)
+    s.pt(u, v, zc + hz + 3, OR[3])
   }
-  // gas manifold: pipes from the column to the tanks
-  for (let k = 0; k < 3; k++) {
-    const z = 4 + k * 0.5
-    s.line(-0.15, -0.6 + k * 0.02, z, 0.64, -0.6 + k * 0.02, z, k === 0 ? MH[3] : k === 1 ? MH[2] : M[1])
+
+  // umbilicals: from the unit and the skid to the spheres
+  hose(s, [-0.05, 0.3, 6], [0.3, 0.55, 6], 2)
+  hose(s, [0.55, 0.48, 6], [0.45, -0.3, 4], 2)
+  hose(s, [-0.4, 0.05, 9], [-0.4, -0.2, 5], 1)
+
+  // the electrolysis unit
+  const UH = 18
+  const hot: Pat = (c, r, w, h) => {
+    if (c === 0 || r === 0 || c === w - 1 || r === h - 1) return NE[2]
+    if (c === 1 || r === 1 || c === w - 2 || r === h - 2) return INK
+    if (r % 2 === 0) return '#5a160e'
+    const flick = (c * 3 + r + Math.floor(t * 4)) % 7 === 0
+    if (flick) return '#fff0c0'
+    return pulse > 0.6 ? OR[4] : (c + r) % 3 === 0 ? OR[4] : OR[3]
   }
-  s.box(0.3, 0.42, -0.52, -0.4, 0, 7, SG, {})
-
-  // compressor house (left): ribbed sand container with a roof fan
-  const ch = 14
-  s.box(-0.92, -0.12, 0.08, 0.92, 0, ch, S, {
-    l: all(at(3, 3, 9, 7, louvre('l')), at(15, 2, 6, 8, litDoor(WARM[3])), at(0, ch - 2, 99, 2, hazard), (c) => (c % 3 === 0 ? S[2] : null)),
-    r: all(at(3, 3, 7, 5, louvre('r')), (c) => (c % 3 === 0 ? S[0] : null)),
-    t: all(roofFan(6.5, 7, 4.5, t), (a, b) => (a === 0 || b === 0 ? S[4] : null)),
+  s.box(-0.95, -0.05, 0.0, 0.95, 0, UH, WH, {
+    roof: WH,
+    l: all(dust('l'), at(1, 5, 9, 9, hot), at(0, 2, 99, 2, orange('l')), at(10, 6, 4, 3, stencil(0b1011011, 'l')), panels(7, 'l')),
+    r: all(dust('r'), at(2, 5, 6, 11, hatch('r')), at(9, 5, 5, 6, vent('r')), at(0, 2, 99, 2, orange('r')), at(9, 12, 5, 3, stencil(0b11011, 'r'))),
+    t: all(fanTop(7, 7.5, 5, t), (a, b) => (a === 0 || b === 0 ? WH[4] : null)),
   })
-  // exhaust stack with steam
-  s.vcyl(-0.82, 0.22, 2, ch, ch + 9, M, { lid: [INK, INK, INK, INK, INK] })
-  if (tier >= 3)
-    // roof radiators: a row of fins along the back
-    for (let k = 0; k < 5; k++) s.box(-0.85 + k * 0.13, -0.8 + k * 0.13, 0.62, 0.86, ch, ch + 5, MH, { t: () => CY[3] })
+  // exhaust vent and a whip antenna with a beacon
+  s.vcyl(-0.84, 0.86, 2, UH, UH + 6, NE, { lid: [INK, INK, INK, INK, INK] })
+  s.line(-0.86, 0.12, UH, -0.86, 0.12, UH + 13, NE[3])
+  status(s, -0.86, 0.12, UH + 14, 'red', (t * 1.5) % 1 < 0.4)
 
-  // pump skid in front: armoured box, gauge panel, valve wheel
-  s.box(0.12, 0.88, 0.14, 0.9, 0, 10, M, {
-    roof: MH,
-    l: all(at(2, 2, 6, 5, cyanWin), at(10, 1, 3, 7, louvre('l')), at(0, 8, 99, 2, hazard), seams(5, M, 'l')),
-    r: all(at(2, 2, 8, 4, label(0b101101110110)), at(11, 2, 3, 6, louvre('r')), seams(5, M, 'r')),
-    t: (a, b) => (a === 3 || b === 3 ? M[2] : null),
+  // the pump skid in front, with an orange handrail and status lamps
+  const KH = 9
+  s.box(0.25, 0.95, 0.45, 0.95, 0, KH, WH, {
+    roof: NE,
+    l: all(dust('l', 0.35), at(1, 2, 5, 4, cyanWin), at(7, 2, 3, 3, stencil(0b101, 'l')), at(0, KH - 1, 99, 1, orange('l'))),
+    r: all(dust('r', 0.35), at(1, 2, 6, 5, vent('r'))),
+    t: (a, b) => (a === 3 || b === 3 ? NE[2] : null),
   })
-  // O₂ header pipe across the skid and up to the tanks
-  s.line(0.2, 0.2, 12, 0.2, -0.45, 12, MH[3])
-  s.line(0.2, 0.2, 11, 0.2, -0.45, 11, M[1])
-  s.line(0.2, -0.45, 4, 0.2, -0.45, 12, MH[2])
-  s.lamp(0.86, 0.88, 12, (t * 2 + 0.5) % 1 < 0.5 ? GLOW : CY[2], CY[1])
+  s.line(0.25, 0.95, KH + 3, 0.95, 0.95, KH + 3, OR[3])
+  s.line(0.95, 0.45, KH + 3, 0.95, 0.95, KH + 3, OR[2])
+  for (const [u, v] of [
+    [0.27, 0.95],
+    [0.95, 0.95],
+    [0.95, 0.47],
+  ])
+    s.line(u, v, KH, u, v, KH + 3, OR[2])
+  status(s, 0.5, 0.6, KH + 1.5, 'green', true)
+  status(s, 0.7, 0.6, KH + 1.5, 'amber', pulse > 0.75)
   s.flush()
-  // steam from the stack
-  puffs(ctx, Math.round(s.X(-0.82, 0.22)), Math.round(s.Y(-0.82, 0.22, ch + 10)), t, STEAM)
+  puffs(ctx, Math.round(s.X(-0.84, 0.86)), Math.round(s.Y(-0.84, 0.86, UH + 7)), t, STEAM)
 }
 
 /* -------------------------------- habitat ------------------------------- */
 
+/** An EVA suit seen from the front: white, gold visor, orange chest panel. 5×10. */
+const SUIT = ['.hhh.', 'hvvvs', '.hhs.', 'wwwws', 'wokws', 'wwwws', '.wws.', '.w.s.', '.w.s.', '.d.d.']
+
 /**
- * Habitat (3×3): a three-storey round tower at the back with warm-lit window
- * bands and a domed roof, two horizontal crew modules with portholes along the
- * left and right edges, and an armoured airlock node at the front corner where
- * they meet. Level 2 stacks a sleeping module on the left wing; level 3 a
- * second on the right wing, plus solar trim on the node.
+ * Habitat (3×3): a big white inflatable dome, its fabric gores sewn with seam
+ * lines and held down by a web of restraint straps with orange buckles, ringed
+ * with sandbag ballast, warm light in its windows. A rigid ribbed airlock
+ * juts out to the lit side with a round hatch and red/green lamps, and two EVA
+ * suits hang on a rack beside it. Level 2 adds an inflatable sleeping tunnel
+ * on the right; level 3 a lit crown cupola and a radiator wing.
  */
 export function bigHabitat(ctx: Ctx, x: number, y: number, t: number) {
   const tier = getTier()
@@ -521,127 +687,160 @@ export function bigHabitat(ctx: Ctx, x: number, y: number, t: number) {
   const s = new Iso(ctx, x, g)
   const blink = (t * 1.5) % 1 < 0.4
 
-  // the tower
-  const TU = -0.66
-  const TV = -0.66
-  const TH = 40
-  s.vcyl(TU, TV, 17, 0, TH, M, {
-    lid: MH,
-    pat: (nx, r, H, l, px, py) => {
-      const fromBot = H - 1 - r
-      if (fromBot < 5) return fromBot === 4 ? INK : Math.round(nx * 9) % 3 === 0 && fromBot === 2 ? R[4] : tone(R, l + 0.08, px, py)
-      if (r === 0) return MH[3]
-      // two floors of windows
-      for (const w0 of [5, 18]) {
-        if (r >= w0 && r < w0 + 6) {
-          const seg = Math.round((nx + 1) * 5.5)
-          const frame = r === w0 || r === w0 + 5 || Math.abs((nx + 1) * 5.5 - seg) < 0.18
-          if (frame || Math.abs(nx) > 0.9) return INK
-          if (w0 === 18 && seg === 3) return l > 0.45 ? CY[4] : CY[2]
-          return r === w0 + 1 ? WARM[4] : (seg + r) % 5 === 0 ? WARM[3] : WARM[2]
+  const DU = -0.3
+  const DV = -0.3
+  const DR = 26
+  const DZ = 6
+  const DH = 31
+  const near = (a: number, step: number, off: number) => {
+    const q = (a - off) / step
+    return Math.abs(q - Math.round(q)) * step
+  }
+
+  // radiator wing (level 3), standing at the back-right
+  if (tier >= 3) {
+    s.box(0.45, 1.3, -1.42, -1.36, 4, 30, WH, { l: all(at(1, 1, 99, 24, radiator('l')), at(0, 0, 99, 1, OR[3])), r: () => NE[1], roof: NE })
+    for (const u of [0.55, 1.2]) s.post(u, -1.39, 0, 4, NE)
+  }
+
+  // the inflatable dome
+  const wins = [-0.12, 0.5, 1.08, 1.68]
+  s.ell(DU, DV, DZ, DR, DH, WH, {
+    cut: -DZ,
+    pat: (nu, nv, nz, l, px, py) => {
+      const az = Math.atan2(nv, nu)
+      const ca = Math.sqrt(Math.max(0, 1 - nz * nz))
+      const dd = dustPx(Math.max(0, nz + 0.18), 0.3, px, py, l)
+      if (dd) return dd
+      // windows on a band round the front
+      if (nz > 0.2 && nz < 0.42)
+        for (const w of wins) {
+          const dx = Math.abs(az - w) * ca * DR
+          if (dx < 2.8) return dx > 1.9 || nz < 0.24 || nz > 0.38 ? NE[1] : nz > 0.34 ? WARM[4] : (px + py) % 3 === 0 ? WARM[3] : WARM[2]
         }
-      }
-      if (r === 12 || r === 13 || r === 25 || r === 26) return r % 13 === 12 ? M[1] : tone(MH, l, px, py)
-      if (r === 30 && Math.round(nx * 10) % 2 === 0) return SG[3]
-      // ladder
-      if (nx > -0.82 && nx < -0.62 && r > 1) return Math.abs(nx + 0.72) > 0.07 ? M[4] : r % 3 === 0 ? MH[3] : null
-      return null
+      const strap = near(az, Math.PI / 2, Math.PI / 4) * ca * DR < 1.05 && nz < 0.95
+      const belt = Math.abs(nz - 0.48) < 0.03 || Math.abs(nz - 0.82) < 0.025
+      if (strap && belt) return l > 0.5 ? OR[3] : OR[2]
+      if (strap || belt) return l > 0.55 ? STRAP[3] : STRAP[2]
+      if (near(az, Math.PI / 8, 0) * ca * DR < 0.45 && nz < 0.9) return tone(WH, l - 0.2, px, py)
+      if (l > 0.94) return WH[4]
+      // gores bulge a little between seams
+      const q = az / (Math.PI / 8)
+      return tone(WH, l + 0.07 * Math.sin((q - Math.floor(q)) * Math.PI) - 0.02, px, py)
     },
   })
-  // domed roof with a skylight ring and a catwalk railing
-  s.ell(TU, TV, TH, 15, 8, MH, {
-    cut: 0,
-    spec: true,
-    pat: (_nu, _nv, nz, l) => (nz > 0.55 && nz < 0.68 ? (l > 0.6 ? GLOW : CY[3]) : null),
+  // crown ring with a cupola (lit at level 3), an antenna and a beacon
+  const top = DZ + DH
+  const CR = tier >= 3 ? 8 : 6
+  s.vcyl(DU, DV, CR, top - 3, top + (tier >= 3 ? 5 : 1), NE, {
+    lid: WH,
+    pat: (nx, r, H, l, px, py) => {
+      if (tier >= 3 && r >= 2 && r <= H - 3) return Math.round(nx * 4) % 2 === 0 ? NE[1] : r === 2 ? WARM[4] : WARM[2]
+      if (r === H - 2) return OR[l > 0.5 ? 3 : 1]
+      return tone(NE, l + 0.1, px, py)
+    },
   })
-  for (let k = 0; k < 40; k++) {
-    const a = (k / 40) * Math.PI * 2
-    const u = TU + Math.cos(a) * 0.78
-    const v = TV + Math.sin(a) * 0.78
-    s.pt(u, v, TH + 4, M[3])
-    if (k % 4 === 0) s.line(u, v, TH, u, v, TH + 4, M[2])
+  const ctop = top + (tier >= 3 ? 5 : 1)
+  s.line(DU + 0.12, DV - 0.05, ctop, DU + 0.12, DV - 0.05, ctop + 12, NE[3])
+  status(s, DU + 0.12, DV - 0.05, ctop + 13, 'red', blink)
+  s.ell(DU - 0.15, DV + 0.1, ctop + 3, 4, 2, WH, { spec: true })
+  s.post(DU - 0.15, DV + 0.1, ctop, ctop + 2, NE)
+
+  // sandbag ballast round the base, two courses
+  const BR = DR / PXT + 0.13
+  const bag = (u: number, v: number, z: number) =>
+    s.ell(u, v, z, 4, 2.6, BAG, {
+      cut: -z,
+      pat: (_nu, _nv, nz, l, px, py) => (hash(px, py) < 0.45 - nz * 0.3 ? tone(REG, l, px, py) : tone(BAG, l + 0.05, px, py)),
+    })
+  for (let k = 0; k < 28; k++) {
+    for (const layer of [0, 1]) {
+      const a = ((k + layer * 0.5) / 28) * Math.PI * 2
+      const u = DU + Math.cos(a) * (BR - layer * 0.05)
+      const v = DV + Math.sin(a) * (BR - layer * 0.05)
+      if (Math.abs(u) > 1.4 || Math.abs(v) > 1.4) continue
+      if (Math.abs(u - 0.5) < 0.42 && v > 0.2) continue // the airlock
+      if (tier >= 2 && Math.abs(v + 0.45) < 0.5 && u > 0.3) continue // the tunnel
+      bag(u, v, 2 + layer * 3.5)
+    }
   }
 
-  // horizontal crew modules on saddles
-  const rad = 0.44
-  const zc = 2 + rad * KZ
-  const porthole = (s0: number, th: number, l: number, px: number, py: number, lit: boolean) => {
-    const ring = Math.abs(Math.round(s0 / 10) * 10 - s0)
-    if (ring < 0.7 && s0 > 3) return M[1]
-    if (th > 3.7 && th < 5.75) return tone(R, l + 0.05, px, py) // rust belly
-    const win = Math.abs(((s0 + 5) % 10) - 5)
-    if (win < 2.4 && th > 0.3 && th < 1.0) return win > 1.7 || th < 0.4 || th > 0.9 ? INK : lit ? (th > 0.75 ? WARM[4] : (px + py) % 3 === 0 ? WARM[3] : WARM[2]) : CY[3]
-    if (Math.abs(th - 1.57) < 0.12) return MH[3] // top seam
-    return null
-  }
-  // left wing along u, at v = +0.88
-  s.hcyl('u', -1.36, 0.6, 0.94, zc, rad, MH, { pat: (s0, th, l, px, py) => porthole(s0, th, l, px, py, true) })
-  // right wing along v, at u = +0.94
-  s.hcyl('v', -1.36, 0.6, 0.94, zc, rad, MH, { pat: (s0, th, l, px, py) => porthole(s0, th, l, px, py, true) })
-  for (const a of [-1.15, -0.45]) {
-    s.box(a - 0.06, a + 0.06, 0.62, 1.26, 0, 3, M, { edge: false })
-    s.box(0.62, 1.26, a - 0.06, a + 0.06, 0, 3, M, { edge: false })
-  }
+  // rigid airlock module along +v, ribbed, with a round hatch at its end
+  const AR = 0.34
+  const AZ = 1.5 + AR * KZ
+  s.hcyl('v', 0.25, 1.36, 0.5, AZ, AR, WH, {
+    pat: (s0, th, l, px, py) => {
+      const dd = dustPx((1 + Math.sin(th)) / 2, 0.3, px, py, l)
+      if (dd) return dd
+      if (s0 > 5 && Math.round(s0) % 5 === 0) return tone(WH, l - 0.28, px, py)
+      if (Math.abs(th - 0.62) < 0.08 && s0 > 6 && s0 < 22) return OR[l > 0.5 ? 3 : 2]
+      if (Math.abs(th - 1.57) < 0.1 && s0 > 8 && s0 < 15) return NE[1]
+      return null
+    },
+    cap: (rr, th, l) => {
+      if (rr > 0.9) return WH[1]
+      if (rr > 0.72) return OR[3]
+      if (rr > 0.64) return INK
+      if (rr < 0.3) return Math.sin(th) > 0 ? WARM[4] : WARM[2]
+      if (rr < 0.38) return INK
+      return l > 0.6 ? WH[4] : WH[3]
+    },
+  })
+  for (const v of [0.85, 1.25]) s.box(0.3, 0.7, v - 0.05, v + 0.05, 0, 3, NE, { edge: false })
+  status(s, 0.5 - 0.46, 1.38, AZ + 3, 'green', true)
+  status(s, 0.5 + 0.46, 1.38, AZ + 3, 'red', blink)
+  s.lamp(0.5, 1.2, AZ + AR * KZ + 1.5, WARM[4], WARM[2])
 
-  // stacked modules on the wings, their ends closed by round hatches
-  const hatchCap = (rr: number, th: number, l: number) => (rr > 0.86 ? M[1] : rr > 0.5 && rr < 0.62 ? INK : rr < 0.5 && Math.abs(Math.sin(th)) < 0.15 ? M[4] : rr < 0.5 ? tone(M, l + 0.2, 0, 0) : MH[l > 0.5 ? 3 : 1])
-  const z2 = zc + rad * KZ + 1 + 0.32 * KZ
+  // EVA suit rack beside the airlock
+  for (const v of [0.72, 1.4]) s.post(1.18, v, 0, 13, NE)
+  s.line(1.18, 0.72, 13, 1.18, 1.4, 13, NE[3])
+  const pal: Record<string, string> = { h: WH[4], s: WH[2], v: AU[3], w: WH[3], o: OR[3], k: NE[1], d: NE[1] }
+  for (const v of [0.86, 1.24]) sprite(s, 1.2, v, 1, SUIT, pal, 2)
+
+  // inflatable sleeping tunnel (level 2), with strap hoops and a rigid end bulkhead
   if (tier >= 2) {
-    s.hcyl('u', -1.2, 0.2, 0.94, z2, 0.32, MH, { pat: (s0, th, l, px, py) => (Math.abs(th - 1.57) < 0.15 ? CY[3] : porthole(s0, th, l, px, py, true)), cap: hatchCap })
-    s.box(-0.95, -0.8, 0.86, 1.02, zc + rad * KZ - 1, z2 - 4, M)
-    s.box(-0.1, 0.05, 0.86, 1.02, zc + rad * KZ - 1, z2 - 4, M)
+    const TR = 0.4
+    s.hcyl('u', 0.35, 1.36, -0.45, 1 + TR * KZ, TR, WH, {
+      pat: (s0, th, l, px, py) => {
+        const dd = dustPx((1 + Math.sin(th)) / 2, 0.3, px, py, l)
+        if (dd) return dd
+        if (Math.abs(((s0 + 3) % 7) - 3.5) < 0.6) return l > 0.55 ? STRAP[3] : STRAP[2]
+        if (Math.abs(th - 1.2) < 0.18 && Math.round(s0) % 7 === 3) return WARM[3]
+        return tone(WH, l + 0.06 * Math.sin(((s0 + 3) % 7) / 7 * Math.PI), px, py)
+      },
+      cap: (rr, th) => (rr > 0.86 ? NE[1] : rr < 0.32 && Math.sin(th) > -0.2 ? WARM[3] : rr < 0.4 ? INK : NE[3]),
+    })
   }
-  if (tier >= 3) {
-    s.hcyl('v', -1.2, 0.2, 0.94, z2, 0.32, MH, { pat: (s0, th, l, px, py) => (Math.abs(th - 1.57) < 0.15 ? CY[3] : porthole(s0, th, l, px, py, true)), cap: hatchCap })
-    s.box(0.86, 1.02, -0.95, -0.8, zc + rad * KZ - 1, z2 - 4, M)
-    s.box(0.86, 1.02, -0.1, 0.05, zc + rad * KZ - 1, z2 - 4, M)
-  }
-
-  // airlock node at the front corner
-  const NH = 22
-  s.box(0.42, 1.4, 0.42, 1.4, 0, NH, M, {
-    roof: MH,
-    l: all(at(5, 5, 8, 15, litDoor(WARM[3])), at(4, 4, 10, 1, SG[4]), at(16, 4, 9, 5, warmWin()), at(16, 11, 9, 2, label(0b110110101101)), at(0, NH - 2, 99, 2, hazard), at(0, 0, 99, 3, armour(3, 'l')), seams(8, M, 'l')),
-    r: all(at(4, 5, 8, 15, litDoor(GLOW, 'r')), at(3, 4, 10, 1, CY[4]), at(15, 5, 6, 4, cyanWin), at(0, NH - 2, 99, 2, hazardDim), at(0, 0, 99, 3, armour(3, 'r')), seams(8, M, 'r')),
-    t: (a, b) => (a > 5 && a < 11 && b > 5 && b < 11 ? (a === 6 || b === 6 || a === 10 || b === 10 ? INK : M[2]) : (a + b) % 8 === 0 ? MH[1] : null),
-  })
-  // entry steps in front of both doors
-  s.box(0.66, 0.9, 1.38, 1.46, 0, 2, M, { roof: SG })
-  s.box(1.38, 1.46, 0.6, 0.86, 0, 2, M, { roof: SG })
-  // floodlights on the node corners
-  s.lamp(1.36, 1.36, NH + 2, WARM[4], WARM[2])
-  s.lamp(0.42, 1.36, NH + 2, blink ? ALERT[4] : ALERT[0], ALERT[1])
-  if (tier >= 3)
-    // solar trim on the node roof
-    s.box(0.5, 1.26, 0.5, 1.26, NH, NH + 1.5, M, { t: (a, b) => (a % 4 === 0 || b % 4 === 0 ? MH[2] : (a + b) % 7 === 0 ? CY[4] : CY[1]) })
   s.flush()
-  // roof antennas and dish over the tower
-  antennas(ctx, Math.round(s.X(TU, TV)) - 3, Math.round(s.Y(TU, TV, TH + 7)), t)
-  rect(ctx, Math.round(s.X(TU, TV)) - 3, Math.round(s.Y(TU, TV, TH + 7)) - 13, 1, 1, blink ? ALERT[4] : ALERT[0])
 }
 
 /* ---------------------------- regolith shield --------------------------- */
 
-/** One sandbag course pattern: bags 6 px long and 4 px tall, staggered. */
+/** One sandbag course: bags 6 px long and 4 px tall, staggered, dustier toward the ground. */
 const bags =
-  (course: number, side: 'l' | 'r' | 't'): Pat =>
+  (course: number, side: 'l' | 'r'): Pat =>
   (c, r) => {
-    const off = (course % 2) * 3
-    const cc = (c + off) % 6
-    const lift = side === 'l' ? 0.1 : side === 'r' ? -0.22 : 0.25
-    if (side === 't') return null
-    if (cc === 5) return side === 'l' ? R[0] : SOIL[1]
-    if (r === 0) return side === 'l' ? S[4] : S[2]
-    if (r === 3) return side === 'l' ? R[1] : SOIL[2]
-    const v = 0.55 + lift - (r - 1) * 0.12 - (cc === 0 || cc === 4 ? 0.12 : 0)
-    return tone(cc % 2 ? S : R, v + 0.2, c * 3 + course, r * 5 + course)
+    const cc = (c + (course % 2) * 3) % 6
+    const lit = side === 'l'
+    if (cc === 5) return lit ? REG[1] : REG[0]
+    if (r === 3) return lit ? BAG[1] : BAG[0]
+    if (r === 0) return cc === 0 || cc === 4 ? (lit ? BAG[3] : BAG[1]) : lit ? BAG[4] : BAG[2]
+    const v = (lit ? 0.72 : 0.42) - (r - 1) * 0.1 - (cc === 0 || cc === 4 ? 0.1 : 0)
+    const dusty = [0.8, 0.5, 0.25, 0.1, 0.05][course] ?? 0
+    const px = c * 3 + course * 7
+    const py = r * 5 + course
+    if (hash(px, py) < dusty + (r === 2 ? 0.15 : 0)) return tone(REG, v + 0.05, px, py)
+    if (cc === 2 && r === 1) return lit ? BAG[2] : BAG[0] // the tie
+    return tone(BAG, v, px, py)
   }
 
 /**
- * Regolith shield (2×2): a low stepped berm of regolith-filled sandbags with a
- * packed crown, a steel-framed shelter hatch with a lit frame on the lit face,
- * a radiation sign on the crown and a dosimeter mast. Upgrades add rust armour
- * plates along the base, then a glowing sensor dome.
+ * Regolith shield (2×2): a stepped berm of sandbags, the lower courses caked
+ * in red dust, under a packed regolith crown. A white storm-shelter portal with
+ * an orange hatch leads in; on the crown a space-weather siren mast carries a
+ * stack light (green when all is calm) under an orange beacon, beside a
+ * radiation sign and a vent. Level 2 lays white water bladders on the crown;
+ * level 3 adds a solar panel and a dosimeter dome.
  */
 export function berm(ctx: Ctx, x: number, y: number, t: number) {
   const tier = getTier()
@@ -650,186 +849,196 @@ export function berm(ctx: Ctx, x: number, y: number, t: number) {
   const COURSES = 5
   for (let k = 0; k < COURSES; k++) {
     const e = 0.92 - k * 0.13
-    s.box(-e, e, -e, e, k * 4, k * 4 + 4, S, {
-      l: bags(k, 'l'),
-      r: bags(k, 'r'),
-      t: (a, b) => {
-        const ledge = Math.min(Math.round(2 * e * 16) - 1 - a, Math.round(2 * e * 16) - 1 - b)
-        if (ledge > 2 && k < COURSES - 1) return null
-        return (a * 7 + b * 3 + k) % 9 === 0 ? R[1] : null
-      },
-      roof: S,
-    })
+    s.box(-e, e, -e, e, k * 4, k * 4 + 4, BAG, { l: bags(k, 'l'), r: bags(k, 'r'), roof: REG })
   }
   // packed crown
   const top = COURSES * 4
-  s.ell(0, 0, top, 12, 5, S, {
+  s.ell(0, 0, top, 12, 5, REG, {
     cut: 0,
-    pat: (_nu, _nv, _nz, l, px, py) => ((px * 3 + py * 7) % 11 === 0 ? R[1] : tone(S, l + 0.12, px, py)),
+    pat: (_nu, _nv, _nz, l, px, py) => ((px * 3 + py * 7) % 11 === 0 ? REG[1] : hash(px, py) > 0.94 ? STRAP[3] : tone(REG, l + 0.1, px, py)),
   })
-  // armour plates (level 2+) round the base
-  if (tier >= 2) {
-    s.box(-0.97, 0.97, 0.9, 0.97, 0, 6, R, { l: armour(3, 'l'), t: () => M[3] })
-    s.box(0.9, 0.97, -0.97, 0.97, 0, 6, R, { r: armour(3, 'r'), t: () => M[2] })
-  }
-  // shelter hatch: a steel portal in the lit face with a lit frame and hazard sill
-  s.box(-0.62, -0.08, 0.6, 0.99, 0, 13, M, {
-    roof: MH,
-    l: all(at(2, 2, 6, 10, litDoor(GLOW)), at(0, 12, 99, 1, SG[4]), seams(9, M, 'l')),
-    r: seams(3, M, 'r'),
-    t: (a) => (a % 3 === 0 ? MH[2] : null),
+
+  // the shelter portal
+  const PH = 14
+  s.box(-0.62, -0.08, 0.6, 1.0, 0, PH, WH, {
+    roof: NE,
+    l: all(at(1, 2, 7, 11, hatch('l')), dust('l', 0.3), at(0, 0, 99, 1, OR[3])),
+    r: all(dust('r', 0.3), panels(3, 'r')),
+    t: (a) => (a % 3 === 0 ? NE[2] : null),
   })
-  s.box(-0.62, -0.08, 0.99, 1.0, 10, 11, SG, { l: hazard, edge: false })
-  s.lamp(-0.13, 0.99, 14, (t * 2) % 1 < 0.5 ? GLOW : CY[2], CY[1])
-  // vent pipe through the crown
-  s.vcyl(0.38, -0.3, 2, top - 4, top + 7, MH, { lid: [INK, INK, INK, INK, INK] })
-  s.box(0.32, 0.44, -0.36, -0.24, top + 7, top + 8, M)
-  // dosimeter mast with a blinking light
-  s.post(-0.35, -0.4, top, top + 14, M)
-  s.lamp(-0.35, -0.4, top + 15, (t * 1.5) % 1 < 0.4 ? ALERT[4] : ALERT[0], ALERT[1])
+  status(s, -0.6, 1.0, PH + 1.5, 'green', true)
+  status(s, -0.1, 1.0, PH + 1.5, 'red', false)
+
+  // vent through the crown
+  s.vcyl(0.42, -0.32, 2, top - 4, top + 7, WH, { lid: [INK, INK, INK, INK, INK], pat: (_nx, r) => (r === 1 ? OR[2] : null) })
+
+  // water bladders on the crown (level 2+)
+  if (tier >= 2)
+    for (const v of [0.12, 0.42]) {
+      const BR2 = 0.13
+      s.hcyl('u', -0.35, 0.3, v, top + 2 + BR2 * KZ, BR2, WH, {
+        pat: (s0, th, l, px, py) => (Math.abs(s0 - 3) < 0.6 || Math.abs(s0 - 8) < 0.6 ? OR[l > 0.5 ? 3 : 1] : Math.abs(th - 1.4) < 0.2 && s0 > 4 && s0 < 7 ? STEN : tone(WH, l, px, py)),
+      })
+    }
+
+  // space-weather siren mast: stack light under an orange beacon, a dosimeter box
+  const MU = -0.36
+  const MV = -0.42
+  s.post(MU, MV, top, top + 16, NE)
+  s.box(MU - 0.12, MU + 0.12, MV - 0.06, MV + 0.12, top + 6, top + 10, WH, { l: (c, r) => (r === 1 && c > 0 && c < 3 ? LAMP.green[0] : null), roof: NE })
+  const stack: ['green' | 'amber' | 'red', boolean][] = [
+    ['green', true],
+    ['amber', false],
+    ['red', false],
+  ]
+  stack.forEach(([col, on], k) => {
+    const z = top + 17 + k * 2
+    s.box(MU - 0.06, MU + 0.06, MV - 0.06, MV + 0.06, z, z + 2, NE, { l: () => (on ? LAMP[col][0] : OFF[col]), r: () => (on ? LAMP[col][1] : OFF[col]), t: () => NE[3] })
+  })
+  const spin = Math.floor(t * 4) % 2 === 0
+  s.box(MU - 0.08, MU + 0.08, MV - 0.08, MV + 0.08, top + 23, top + 25, OR, { l: () => (spin ? OR[4] : OR[2]), r: () => (spin ? OR[2] : OR[3]), t: () => OR[4] })
+
+  // level 3: a solar panel feeding the siren, and a dosimeter dome
   if (tier >= 3) {
-    s.ell(0.28, 0.32, top + 2, 5, 4, CY, { cut: 0, spec: true, pat: (_nu, _nv, nz, l) => (nz > 0.9 ? GLOW : l > 0.6 ? CY[4] : null) })
-    s.box(0.18, 0.38, 0.22, 0.42, top - 1, top + 2, M)
+    s.post(0.15, -0.6, top - 2, top + 6, NE)
+    s.box(-0.1, 0.5, -0.82, -0.4, top + 6, top + 7, NE, { t: solarTop, l: () => NE[2], r: () => NE[1] })
+    s.ell(0.3, 0.32, top + 2, 5, 4, WH, { cut: 0, spec: true, pat: (_nu, _nv, nz, l) => (nz < 0.2 ? OR[2] : l > 0.93 ? WH[4] : null) })
   }
   s.flush()
   // radiation sign on the crown
-  const sx = Math.round(s.X(0.4, 0.2))
-  const sy = Math.round(s.Y(0.4, 0.2, top))
+  const sx = Math.round(s.X(0.42, 0.18))
+  const sy = Math.round(s.Y(0.42, 0.18, top))
   signboard(ctx, sx, sy - 11, 7, 6, sy, trefoil(7, 6))
 }
 
 /* ------------------------------ greenhouse ------------------------------ */
 
 /**
- * Greenhouse (4×3): a long geodesic vault — a triangulated steel lattice with
- * rust joints over cyan glass — on an armoured knee wall, with four rows of
- * crops in soil troughs either side of a lit walkway, hanging grow lights, an
- * airlock vestibule on the front end and water tanks at the back. `dim` (night
- * or no power) greys the glass, wilts the crops and turns the lights off.
- * Level 2 adds a crest catwalk with vents; level 3 a geodesic cupola.
+ * Greenhouse (4×3): a long inflatable growing hall, translucent fabric between
+ * white arch ribs, its feet ballasted with sandbags. Inside, tiered racks of
+ * plants under pink-white LED strips flood the whole hall with a pink glow. A
+ * rigid airlock vestibule closes the front end; insulated water tanks stand at
+ * the back. `dim` (night or no power) turns the lights off and greys the skin.
+ * Level 2 adds a side airlock; level 3 gold-foil tanks and a lit ridge.
  */
 export function bigGreenhouse(ctx: Ctx, x: number, y: number, t: number, dim: boolean) {
   const tier = getTier()
   const g = plinth(ctx, x, y, 4, 3, 5)
-  const s = new Iso(ctx, x, g, dim ? 0.45 : 0.4)
+  const s = new Iso(ctx, x, g, dim ? 0.55 : 0.36)
   const L = 1.8
-  const RR = 1.32
-  const KW = 4 // knee-wall height
-  const Z = 34 // vault height above the knee wall
-  const GL: Ramp = dim ? RAMP.neutral : CY
-  const leaf: Ramp = dim ? ['#3d3420', '#5e5028', '#8a7638', '#b09a4c', '#cfbb6c'] : RAMP.veg
-  const leaf2: Ramp = dim ? ['#3a3220', '#564a26', '#7a6a34', '#9a8844', '#b8a75e'] : RAMP.leaf
+  const RR = 1.3
+  const KW = 3
+  const Z = 36
+  const lit = !dim
+  const SKIN: Ramp = dim ? ['#5d5a63', '#7f7b85', '#a29ea6', '#c3c0c4', '#dedbdc'] : ['#9a4f86', '#c46fac', '#e597cc', '#f6bfe0', '#ffe4f3']
+  const leaf: Ramp = dim ? ['#2e2c1e', '#454229', '#5f5c36', '#7a7646', '#959058'] : RAMP.leaf
+  const vh = (v: number) => Z * Math.sqrt(Math.max(0, 1 - (v / RR) ** 2))
 
   // water tanks behind the back end
-  for (const v of [-0.7, 0.7]) {
-    s.vcyl(-1.86, v, 6, 0, 16, MH, { lid: M, pat: (_nx, r) => (r === 4 || r === 11 ? CY[2] : null) })
-  }
-  // knee wall
-  s.box(-L, L, -RR, RR, 0, KW, M, { roof: MH, l: all(armour(4, 'l'), seams(12, M, 'l')), r: all(armour(4, 'r'), seams(12, M, 'r')), t: () => null })
-  // floor: walkway and soil troughs
-  const rows = [-0.92, -0.38, 0.38, 0.92]
-  for (let u = -L + 0.04; u <= L - 0.04; u += 1 / 32)
-    for (let v = -RR + 0.06; v <= RR - 0.06; v += 1 / 32) {
-      const bed = rows.some((rv) => Math.abs(v - rv) < 0.17)
-      const rim = rows.some((rv) => Math.abs(Math.abs(v - rv) - 0.19) < 0.03)
-      const walk = Math.abs(v) < 0.12
-      let c: Paint
-      if (bed) c = (px, py) => tone(SOIL, 0.55, px, py)
-      else if (rim) c = M[3]
-      else if (walk) c = !dim && Math.round(u * 8) % 3 === 0 && Math.abs(v) < 0.03 ? GLOW : (px, py) => tone(MH, dim ? 0.3 : 0.6, px, py)
-      else c = dim ? M[1] : M[3]
-      s.pt(u, v, KW + (bed ? 2 : rim ? 3 : 0.5), c)
-    }
-  // crops: tall tomato vines on the outer rows, low lettuce on the inner rows
-  for (const rv of rows) {
-    const outer = Math.abs(rv) > 0.6
-    for (let u = -L + 0.14; u <= L - 0.14; u += outer ? 0.16 : 0.11) {
-      const seed = Math.sin(u * 37 + rv * 11)
-      const hgt = outer ? (dim ? 6 : 9) + Math.floor(((seed + 1) / 2) * 4) : (dim ? 2 : 4) + Math.floor(((seed + 1) / 2) * 2)
-      const wid = outer ? 0.1 : 0.13
-      for (let z = 0; z <= hgt; z += 0.5)
-        for (let dv = -wid; dv <= wid; dv += 1 / 32)
-          for (const du of [-0.04, 0, 0.04]) {
-            const k = 1 - (z / (hgt + 1)) * (outer ? 0.3 : 0.9)
-            if (Math.abs(dv) > wid * k) continue
-            const fruit = !dim && outer && (Math.floor(z) % 3 === 1) && Math.abs(dv) < 0.04 && seed > -0.2 && du === 0
-            const ramp = outer ? leaf : leaf2
-            s.pt(u + du, rv + dv, KW + 2 + z, fruit ? RAMP.alert[2] : (px, py) => tone(ramp, 0.25 + (z / hgt) * 0.55 + (dv > 0 ? 0.12 : 0), px, py))
-          }
-      if (outer) s.line(u, rv, KW + 2, u, rv, KW + 2 + hgt + 2, M[3], -0.01) // stake
-    }
-  }
-  // hanging grow lights over each row
-  for (const rv of rows)
-    for (let u = -L + 0.3; u <= L - 0.25; u += 0.5) {
-      const zl = KW + Z * Math.sqrt(Math.max(0, 1 - (rv / RR) ** 2)) - 6
-      s.line(u, rv, zl, u, rv, zl + 4, M[2])
-      s.line(u - 0.08, rv, zl, u + 0.08, rv, zl, dim ? M[2] : (t * 2 + u) % 1 < 0.8 ? RAMP.alert[4] : RAMP.alert[3])
-    }
-
-  // the lattice vault
-  const ROWS = 6
-  for (let u = -L; u <= L; u += 1 / 56)
-    for (let a = 0; a <= Math.PI; a += Math.PI / 220) {
-      const v = RR * Math.cos(a)
-      const z = KW + Z * Math.sin(a)
-      const sN = (u + L) / 0.5
-      const q = (a / Math.PI) * ROWS
-      const fq = q - Math.round(q)
-      const d1 = sN + q / 2
-      const d2 = sN - q / 2
-      const f1 = d1 - Math.round(d1)
-      const f2 = d2 - Math.round(d2)
-      const lat = Math.abs(fq) < 0.06
-      const diag = Math.abs(f1) < 0.04 || Math.abs(f2) < 0.04
-      const node = lat && (Math.abs(f1) < 0.08 || Math.abs(f2) < 0.08)
-      const lit = 0.5 + 0.45 * Math.cos(a - 0.7)
-      if (node) s.pt(u, v, z, lit > 0.6 ? R[4] : R[2])
-      else if (lat || diag || a < 0.03 || a > Math.PI - 0.03) s.pt(u, v, z, (px, py) => tone(M, 0.25 + lit * 0.5, px, py))
-      else {
-        const streak = (((u * 0.8 + a * 1.4) % 1.3) + 1.3) % 1.3
-        const glint = !dim && a > 0.3 && a < 1.6 && streak < 0.12
-        s.pt(u, v, z, glint ? GLOW : (px, py) => tone(GL, dim ? 0.02 + lit * 0.3 : 0.68 + lit * 0.4, px, py), true)
-      }
-    }
-  // end walls: lattice and glass, the front one with an airlock frame
-  for (const end of [-L, L])
-    for (let v = -RR; v <= RR; v += 1 / 56) {
-      const top = Z * Math.sqrt(Math.max(0, 1 - (v / RR) ** 2))
-      for (let z = 0; z <= top; z += 0.5) {
-        const edge = top - z < 1.2
-        if (end > 0 && Math.abs(v) < 0.3 && z < 16) continue // vestibule covers it
-        if (edge || Math.abs(v) < 0.02 || Math.abs(Math.abs(v) - 0.65) < 0.02 || Math.abs(z - top / 2) < 0.5) s.pt(end, v, KW + z, M[2])
-        else s.pt(end, v, KW + z, (px, py) => tone(GL, dim ? 0.15 : 0.7, px, py), true)
-      }
-    }
-  // airlock vestibule on the front end
-  s.box(L - 0.1, L + 0.12, -0.36, 0.36, 0, 18, M, {
-    roof: MH,
-    l: all(at(0, 0, 99, 3, armour(3, 'l')), seams(4, M, 'l')),
-    r: all(at(2, 4, 8, 13, litDoor(dim ? M[3] : GLOW, 'r')), at(1, 3, 10, 1, dim ? M[2] : CY[4]), at(0, 16, 99, 2, hazardDim), seams(11, M, 'r')),
-    t: (a) => (a % 3 === 0 ? MH[2] : null),
-  })
-  s.lamp(L + 0.12, 0.36, 19, dim ? ALERT[1] : (t * 2) % 1 < 0.5 ? GLOW : CY[2], dim ? ALERT[0] : CY[1])
-  // ridge catwalk with roof vents (level 2+)
-  if (tier >= 2) {
-    s.box(-L + 0.1, L - 0.1, -0.08, 0.08, KW + Z, KW + Z + 1, M, { t: (a) => (a % 2 ? M[3] : M[1]) })
-    for (let u = -L + 0.1; u <= L - 0.1; u += 1 / 16) s.pt(u, 0.09, KW + Z + 3, M[3])
-    for (let u = -L + 0.1; u <= L - 0.1; u += 0.25) s.line(u, 0.09, KW + Z + 1, u, 0.09, KW + Z + 3, M[2])
-    for (const u of [-1.2, 1.2]) s.box(u - 0.12, u + 0.12, -0.12, 0.12, KW + Z, KW + Z + 3, MH, { roof: M, l: (c, r) => (r === 1 ? INK : null), r: (c, r) => (r === 1 ? INK : null) })
-  }
-  // geodesic cupola on the crest (level 3)
-  if (tier >= 3)
-    s.ell(0, 0, KW + Z - 2, 12, 9, GL, {
-      cut: 0,
-      pat: (nu, nv, nz, l, px, py) => {
-        const ring = Math.acos(Math.min(1, nz)) / (Math.PI / 2)
-        const k = Math.floor(ring * 3)
-        const a = (Math.atan2(nv, nu) / Math.PI) * (5 - k) + (k % 2) * 0.5
-        if (Math.abs(ring * 3 - Math.round(ring * 3)) < 0.1 || (ring > 0.2 && Math.abs(a - Math.round(a)) < 0.07)) return l > 0.55 ? M[4] : M[2]
-        if (nz > 0.97) return M[3]
-        return dim ? tone(RAMP.neutral, l * 0.35, px, py) : tone(CY, 0.3 + l * 0.7, px, py)
+  for (const v of [-0.65, 0.65])
+    s.vcyl(-1.88, v, 6, 0, 18, tier >= 3 ? AU : WH, {
+      lid: NE,
+      pat: (_nx, r, H, l, px, py) => {
+        if (r === 3 || r === 4) return OR[l > 0.5 ? 3 : 1]
+        if (tier >= 3) return r > H - 4 ? tone(NE, l, px, py) : foil(l, px, py)
+        return dustPx(1 - r / H, 0.28, px, py, l)
       },
     })
+
+  // white base ring
+  s.box(-L, L, -RR, RR, 0, KW, WH, { l: all(dust('l', 0.7), panels(12, 'l')), r: all(dust('r', 0.7), panels(12, 'r')) })
+  // floor: a grated walkway down the middle, catching the pink light
+  for (let u = -L + 0.04; u <= L - 0.04; u += 1 / 32)
+    for (let v = -RR + 0.06; v <= RR - 0.06; v += 1 / 32) {
+      const walk = Math.abs(v) < 0.16
+      const c: Paint = (px, py) => (lit && hash(px, py) < (walk ? 0.3 : 0.15) ? PINK[3] : tone(NE, walk ? (dim ? 0.3 : 0.62) : dim ? 0.2 : 0.42, px, py))
+      s.pt(u, v, KW + 0.5, c)
+    }
+
+  // racks: shelves of plants, each shelf lit from the one above
+  const racks = [-0.92, -0.42, 0.42, 0.92]
+  for (const rv of racks) {
+    const zs: number[] = []
+    for (let z = KW + 2; z < KW + vh(rv) - 7; z += 7) zs.push(z)
+    for (let u = -L + 0.15; u <= L - 0.1; u += 0.45) s.post(u, rv + 0.1, KW, zs[zs.length - 1] + 6, NE)
+    zs.forEach((z, i) => {
+      s.box(-L + 0.12, L - 0.12, rv - 0.11, rv + 0.11, z, z + 1, NE, { edge: false, l: () => (dim ? NE[1] : NE[2]), t: (a) => (a % 3 ? NE[1] : NE[2]) })
+      // plants
+      for (let u = -L + 0.18; u <= L - 0.18; u += 0.085) {
+        const seed = hash(Math.round(u * 100), Math.round(rv * 100) + i * 31)
+        const h = (dim ? 2 : 3) + Math.floor(seed * 3)
+        for (let dz = 0; dz <= h; dz += 0.5)
+          for (let dv = -0.09; dv <= 0.09; dv += 1 / 32) {
+            if (Math.abs(dv) > 0.09 * (1 - (dz / (h + 1)) * 0.6)) continue
+            const pink = lit && dz >= h - 0.5 && hash(Math.round(u * 97 + dv * 50), i) < 0.35
+            s.pt(u, rv + dv, z + 1.5 + dz, pink ? PINK[4] : (px, py) => tone(leaf, 0.3 + (dz / h) * 0.5 + (dv > 0 ? 0.12 : 0), px, py))
+          }
+      }
+      // the LED strip above this shelf
+      const zl = i + 1 < zs.length ? zs[i + 1] - 0.5 : z + 6
+      s.line(-L + 0.16, rv, zl, L - 0.16, rv, zl, lit ? ((t * 2 + i * 0.3) % 1 < 0.9 ? PINK[4] : PINK[3]) : NE[1], 0.02)
+      if (lit) s.line(-L + 0.16, rv + 0.06, zl - 0.6, L - 0.16, rv + 0.06, zl - 0.6, PINK[2], 0.01)
+    })
+  }
+
+  // the fabric vault: translucent skin between white arch ribs
+  const RIB = 0.45
+  for (let u = -L; u <= L + 1e-6; u += 1 / 56)
+    for (let a = 0; a <= Math.PI; a += Math.PI / 240) {
+      const v = RR * Math.cos(a)
+      const z = KW + Z * Math.sin(a)
+      const ribQ = (u + L) / RIB
+      const rib = Math.abs(ribQ - Math.round(ribQ)) * RIB < 1 / 40
+      const sun = 0.5 + 0.45 * Math.cos(a - 0.7)
+      if (rib) s.pt(u, v, z, (px, py) => tone(WH, 0.35 + sun * 0.6, px, py))
+      else if (Math.abs(a - Math.PI / 2) < 0.012 || Math.abs(a - 0.55) < 0.01 || Math.abs(a - Math.PI + 0.55) < 0.01) s.pt(u, v, z, (px, py) => tone(NE, 0.4 + sun * 0.5, px, py))
+      else {
+        const seam = Math.abs(((a / (Math.PI / 7)) % 1) - 0.5) > 0.46
+        const glint = lit && a > 0.35 && a < 1.3 && (((u * 0.8 + a * 1.4) % 1.3) + 1.3) % 1.3 < 0.06
+        s.pt(u, v, z, glint ? '#ffffff' : (px, py) => tone(SKIN, (dim ? 0.15 : 0.4) + sun * 0.45 - (seam ? 0.2 : 0), px, py), true)
+      }
+    }
+  // end walls: skin with a light frame
+  for (const end of [-L, L])
+    for (let v = -RR; v <= RR; v += 1 / 56) {
+      const top = vh(v)
+      for (let z = 0; z <= top; z += 0.5) {
+        if (end > 0 && Math.abs(v) < 0.42 && z < 18) continue // the vestibule
+        if (top - z < 1.2 || Math.abs(Math.abs(v) - 0.65) < 0.02 || Math.abs(v) < 0.02) s.pt(end, v, KW + z, end > 0 ? WH[2] : WH[3])
+        else s.pt(end, v, KW + z, (px, py) => tone(SKIN, dim ? 0.2 : 0.6, px, py), true)
+      }
+    }
+  // sandbags along the lit side at every rib foot
+  for (let u = -L; u <= L + 1e-6; u += RIB / 2) {
+    if (tier >= 2 && Math.abs(u) < 0.45) continue
+    s.ell(u, RR + 0.1, 2, 4, 2.4, BAG, { cut: -2, pat: (_nu, _nv, nz, l, px, py) => (hash(px, py) < 0.5 - nz * 0.3 ? tone(REG, l, px, py) : tone(BAG, l + 0.05, px, py)) })
+  }
+
+  // the airlock vestibule on the front end
+  const VH = 19
+  s.box(L - 0.12, L + 0.16, -0.42, 0.42, 0, VH, WH, {
+    roof: NE,
+    l: all(dust('l'), at(0, 2, 99, 2, orange('l'))),
+    r: all(dust('r'), at(2, 5, 9, 13, hatch('r', lit)), at(0, 2, 99, 2, orange('r')), at(11, 6, 2, 3, stencil(0b101, 'r'))),
+    t: (a) => (a % 3 === 0 ? NE[2] : null),
+  })
+  status(s, L + 0.16, -0.36, VH - 4, 'green', lit)
+  status(s, L + 0.16, 0.36, VH - 4, 'red', dim && (t * 1.5) % 1 < 0.4)
+  s.lamp(L + 0.16, 0, VH + 1.5, lit ? WARM[4] : NE[2], lit ? WARM[2] : NE[1])
+
+  // a side airlock on the lit flank (level 2+)
+  if (tier >= 2) {
+    s.box(-0.32, 0.32, RR - 0.25, RR + 0.18, 0, 16, WH, {
+      roof: NE,
+      l: all(dust('l'), at(2, 3, 7, 12, hatch('l', lit)), at(0, 1, 99, 1, OR[3])),
+      r: all(dust('r'), at(0, 1, 99, 1, OR[1])),
+    })
+    status(s, 0.3, RR + 0.18, 15, 'green', lit)
+  }
+  // a lit ridge walkway (level 3)
+  if (tier >= 3) {
+    s.box(-L + 0.2, L - 0.2, -0.07, 0.07, KW + Z, KW + Z + 1, NE, { t: (a) => (a % 2 ? NE[3] : NE[1]) })
+    for (let u = -L + 0.3; u <= L - 0.3; u += 0.6) status(s, u, 0, KW + Z + 2.5, 'amber', lit)
+  }
   s.flush()
 }

@@ -1,6 +1,6 @@
 /** Shared palette shortcuts and small parts (smoke, glow strips, stacks, antennas) for the building art. */
 import { rect, type Ctx } from '@/site/pixel/engine'
-import { cyl, dome, faceL, faceR, GLOW, hull, hullTop, INK, lamp, RAMP, ventPx, type Ramp } from '@/game/art/pixel'
+import { cyl, dome, faceL, faceR, GLOW, hull, hullTop, INK, lamp, RAMP, type Ramp } from '@/game/art/pixel'
 
 export function line(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, c: string) {
   const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1)
@@ -61,15 +61,29 @@ export function antennas(ctx: Ctx, x: number, y: number, t: number) {
   lamp(ctx, x, y - 11, (t * 1.5) % 1 < 0.4 ? RAMP.alert[4] : RAMP.alert[0], RAMP.alert[1])
 }
 
+/** Stable per-pixel noise for dust and foil. */
+const kh = (a: number, b: number, s = 0) => {
+  let n = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(s | 0, 1442695041)) | 0
+  n = Math.imul(n ^ (n >>> 13), 1274126177)
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296
+}
+
 /**
- * Parts an upgrade adds to any building: a back-corner equipment module with a
- * glowing strip from level 2, and a mast with a dish and a beacon at level 3.
- * Drawn behind the building so it peeks out without covering its face. It
- * grows with the footprint: a 1×1 gets a small cabinet, a 3×3 or 4×3 a taller
- * plated module with a hazard band, a stencilled label and a lattice mast.
+ * Parts an upgrade adds to any building, in the white space-agency look: a
+ * back-corner equipment module of white composite with an orange band, red and
+ * green status lamps, a radiator on its shaded side and red dust at its foot
+ * from level 2, and a light-grey mast with a white dish and a beacon at level 3.
+ * Drawn behind the building so it peeks out without covering its face. It grows
+ * with the footprint: a 1×1 gets a small cabinet, a 3×3 or 4×3 a taller module
+ * with a gold-foil panel, a stencilled label and a lattice mast.
  */
 export function upgradeKit(ctx: Ctx, x: number, y: number, w: number, h: number, t: number, tier: number) {
   if (tier < 2) return
+  const W = RAMP.hull
+  const N = RAMP.neutral
+  const OR = RAMP.orange
+  const AU = RAMP.gold
+  const DU = RAMP.regolith
   const span = w + h
   const big = span > 2
   const k = Math.max(0, span - 2) // 0 for 1×1, 2 for 2×2, 4 for 3×3, 5 for 4×3
@@ -83,39 +97,56 @@ export function upgradeKit(ctx: Ctx, x: number, y: number, w: number, h: number,
   const bx = Math.round(x + (h - w) * 8 * pull) + slide
   const byy = Math.round(y - (w + h) * 4 * pull - P + slide / 2)
   const mt = hullTop(byy, hw, mh)
-  hull(ctx, bx, mt, hw, mh, M, { roof: MH, seams: big ? 3 : 0 })
-  faceL(ctx, bx, mt, hw, 1, 1, 1, mh - 2, (_, r) => (r === 0 ? GLOW : CY[4]))
-  faceR(ctx, bx, mt, hw, 1, Math.min(hw - 2, 3 + k), 2, Math.min(4, mh - 4), ventPx)
+  const on = (rate: number, ph = 0) => (t * rate + ph) % 1 < 0.45
+  hull(ctx, bx, mt, hw, mh, W, { roof: N, seams: big ? 3 : 0 })
+  // orange band under the roof edge, status lamps, radiator fins in the shade
+  faceL(ctx, bx, mt, hw, 0, hw, 1, 1, OR[3])
+  faceR(ctx, bx, mt, hw, 0, hw, 1, 1, OR[1])
+  faceL(ctx, bx, mt, hw, 1, 1, 3, 1, on(2) ? '#7ee07a' : '#2f6a3a')
+  faceL(ctx, bx, mt, hw, 3, 1, 3, 1, on(1.5, 0.5) ? '#ff5a4f' : RAMP.alert[0])
+  faceR(ctx, bx, mt, hw, 1, Math.min(hw - 2, 3 + k), 3, Math.min(5, mh - 4), (c, r) => (r === 0 ? N[4] : c % 2 ? N[1] : N[3]))
+  // red dust drifting up the foot of both faces
+  const dust = (c: number, r: number) => (kh(c, r, hw) < (r + 1) * 0.22 ? (kh(c, r, 7) < 0.3 ? DU[2] : DU[3]) : null)
+  faceL(ctx, bx, mt, hw, 0, hw, mh - 2, 2, dust)
+  faceR(ctx, bx, mt, hw, 0, hw, mh - 2, 2, dust)
   if (big) {
-    faceL(ctx, bx, mt, hw, 3, 1, 1, mh - 2, (_, r) => (r === 0 ? GLOW : CY[3]))
-    faceL(ctx, bx, mt, hw, 5, hw - 6, 2, 1, (c) => (c % 3 === 2 ? null : INK))
-    faceL(ctx, bx, mt, hw, 0, hw, mh - 2, 2, (c, r) => ((c + r) % 4 < 2 ? SG[4] : INK))
-    faceR(ctx, bx, mt, hw, 0, hw, 0, 1, (c) => (c % 3 === 0 ? R[3] : R[1]))
-    // roof vent box and, until the mast arrives, a whip antenna with a cyan tip
-    rect(ctx, bx - 3, mt + 2, 4, 2, M[3])
-    rect(ctx, bx - 3, mt + 4, 4, 1, M[1])
+    // gold-foil panel, a stencilled label and a roof equipment box
+    faceL(ctx, bx, mt, hw, 5, hw - 6, 3, Math.max(2, mh - 7), (c, r) => {
+      if ((c + 2 * r) % 7 === 0) return AU[1]
+      const v = kh(c, r, 3)
+      return v < 0.14 ? AU[4] : v < 0.55 ? AU[3] : AU[2]
+    })
+    faceL(ctx, bx, mt, hw, 1, 3, 5, 3, (c, r) => (r === 1 || (c + r) % 3 === 2 ? null : '#3a3442'))
+    rect(ctx, bx - 3, mt + 2, 4, 2, N[4])
+    rect(ctx, bx - 3, mt + 4, 4, 1, N[1])
+    rect(ctx, bx - 2, mt + 3, 2, 1, MH[3])
     if (tier < 3) {
+      // whip antenna with a red tip
       const wh = 10 + k * 2
-      rect(ctx, bx + 2, mt + 2 - wh, 1, wh, M[4])
-      rect(ctx, bx + 1, mt + 1, 3, 1, M[2])
-      lamp(ctx, bx + 2, mt + 1 - wh, (t * 1.5) % 1 < 0.5 ? GLOW : CY[1], CY[0])
+      rect(ctx, bx + 2, mt + 2 - wh, 1, wh, N[4])
+      rect(ctx, bx + 1, mt + 1, 3, 1, MH[3])
+      lamp(ctx, bx + 2, mt + 1 - wh, on(1.5) ? '#ff5a4f' : RAMP.alert[0], RAMP.alert[1])
     }
   }
   if (tier < 3) return
   const mast = big ? 20 + k * 4 : 14
   const top = mt - mast
-  rect(ctx, bx + 3, top, 1, mast + 2, M[3])
-  rect(ctx, bx + 4, top + 1, 1, mast + 1, M[1])
+  rect(ctx, bx + 3, top, 1, mast + 2, N[4])
+  rect(ctx, bx + 4, top + 1, 1, mast + 1, MH[2])
   if (big) {
-    for (let r = top + 4; r < mt; r += 4) rect(ctx, bx + 2, r, 4, 1, M[2])
-    // yard-arm with two whip antennas
-    rect(ctx, bx - 2, top + 3, 10, 1, MH[3])
-    rect(ctx, bx - 2, top - 1, 1, 4, M[4])
-    rect(ctx, bx + 7, top, 1, 3, M[4])
-    lamp(ctx, bx - 2, top - 2, (t * 1.5 + 0.5) % 1 < 0.4 ? RAMP.cyan[4] : RAMP.cyan[0], RAMP.cyan[1])
+    for (let r = top + 4; r < mt; r += 4) rect(ctx, bx + 2, r, 4, 1, MH[3])
+    // yard-arm with two whip antennas, an orange marker on one
+    rect(ctx, bx - 2, top + 3, 10, 1, N[4])
+    rect(ctx, bx - 2, top - 1, 1, 4, N[3])
+    rect(ctx, bx + 7, top, 1, 3, N[3])
+    rect(ctx, bx + 7, top, 1, 1, OR[3])
+    lamp(ctx, bx - 2, top - 2, on(1.5, 0.5) ? '#7ee07a' : '#2f6a3a', '#3f7a4a')
   }
+  // a white high-gain dish with a gold feed, and the red beacon on top
   const dr = big ? 4 : 3
-  dome(ctx, bx + 3 + dr, top + Math.round(mast * 0.4), dr, 2, 2, MH, false)
-  rect(ctx, bx + 3 + dr, top + Math.round(mast * 0.4) - 1, 1, 1, GLOW)
-  lamp(ctx, bx + 3, top - 2, (t * 1.5) % 1 < 0.4 ? RAMP.alert[4] : RAMP.alert[0], RAMP.alert[1])
+  const dy = top + Math.round(mast * 0.4)
+  dome(ctx, bx + 3 + dr, dy, dr, 2, 2, W, false)
+  rect(ctx, bx + 3 + dr, dy - 1, 1, 1, AU[3])
+  rect(ctx, bx + 3, dy, dr, 1, MH[3])
+  lamp(ctx, bx + 3, top - 2, on(1.5) ? '#ff5a4f' : RAMP.alert[0], RAMP.alert[1])
 }
