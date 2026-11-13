@@ -43,6 +43,7 @@ const ICONS = {
   guide: ['.kkkkkkk.', 'kwwwwwwwk', 'kwwkkkwwk', 'kwwwwkwwk', 'kwwwkkwwk', 'kwwwkwwwk', 'kwwwwwwwk', 'kwwwkwwwk', '.kkkkkkk.'],
   pause: ['.........', '.kkk.kkk.', '.kwk.kwk.', '.kwk.kwk.', '.kwk.kwk.', '.kwk.kwk.', '.kwk.kwk.', '.kkk.kkk.', '.........'],
   play: ['.kk......', '.kwkk....', '.kwwwkk..', '.kwwwwwk.', '.kwwwwwwk', '.kwwwwwk.', '.kwwwkk..', '.kwkk....', '.kk......'],
+  comms: ['......c..', '.kkk..c.c', 'kwwgk..c.', 'kwgggk.c.', '.kggGGk..', '..kkGdk..', '....kdk..', '...kGGk..', '..kkkkkk.'],
   sun: ['....y....', '.y.....y.', '...kkk...', '..kyyyk..', 'y.kyyYk.y', '..kyYYk..', '...kkk...', '.y.....y.', '....y....'],
   moon: ['...kkk...', '..kgggk..', '.kgGkk...', '.kgk.....', '.kgk.....', '.kgGkk...', '..kgggk..', '...kkk...', '.........'],
   storm: ['.........', '.kkkkkk..', 'kooooook.', '.kkkkooOk', '.kooookk.', 'kOOkkk...', '.kooooook', '..kkkkkk.', '.........'],

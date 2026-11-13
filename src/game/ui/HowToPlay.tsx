@@ -26,6 +26,9 @@ import {
 } from '@/game/core/data'
 import { MISSIONS } from '@/game/core/missions'
 import { MARS_RADIATION, OSDR_STUDIES, SOURCES } from '@/game/core/nasa'
+import { lightMinutes } from '@/game/core/orbits'
+import { CARGO, PACK_LEAD } from '@/game/core/sim'
+import type { Cargo } from '@/game/core/types'
 
 /**
  * The illustrated field manual for RENOVA. Used on first launch, from the HUD
@@ -223,7 +226,8 @@ const GLOSSARY: [string, string][] = [
   ['Microgravity', 'The floating feeling astronauts have in orbit. Without weight to carry, muscles and bones get weaker, so astronauts exercise every day. Mars has gravity, but only 38% of Earth’s.'],
   ['Power and energy', 'Power (kilowatts, kW) is how fast electricity is being made or used right now. Energy (kilojoules, kJ) is how much is stored up, like water in a tank. Batteries store energy.'],
   ['Dust storm', 'Strong winds lift dust high into the air. It blocks sunlight, so solar panels make much less power.'],
-  ['Communication delay', 'Radio messages travel at the speed of light, but Mars is so far away that a message takes between about 3 and 22 minutes to arrive, depending on where the planets are. The crew can’t wait for Earth to help in an emergency.'],
+  ['Communication delay', 'Radio messages travel at the speed of light, but Mars is so far away that a message takes between about 3 and 22 minutes to arrive, depending on where the planets are. The game works out today’s real delay; open Mission Control to see it. The crew can’t wait for Earth to help in an emergency.'],
+  ['Solar conjunction', 'When Mars is behind the Sun, as seen from Earth. The Sun scrambles radio signals, so missions stop sending commands for about two weeks. It happens every 26 months.'],
   ['Mission planner', 'The people on Earth who decide what a mission does, what it carries and how much risk is OK. In RENOVA, that’s you.'],
 ]
 
@@ -231,7 +235,7 @@ const GLOSSARY: [string, string][] = [
 
 type Chapter = { title: string; kicker: string; body: ReactNode }
 
-function chapters(art: Art, sun: string): Chapter[] {
+function chapters(art: Art, sun: string, minutes: number): Chapter[] {
   const machines: Kind[] = ['melter', 'smelter', 'kiln', 'washer', 'greenhouse']
   const coreBeds = BUILDINGS.core.housing ?? 0
   return [
@@ -259,6 +263,7 @@ function chapters(art: Art, sun: string): Chapter[] {
               ['Grow food in a greenhouse', 'Food for the crew', 'Water, which the crew also has to drink'],
               ['Do research in a lab', 'Machines that work faster', 'Power and metal now, for a reward later'],
               ['Spread out with pylons', 'More room and more resources', 'Metal for every pylon, and longer belts'],
+              ['Order materials on the supply ship', 'Metal and bricks to build with', 'No new crew on that ship'],
             ]}
           />
           <H>How you win</H>
@@ -434,9 +439,16 @@ function chapters(art: Art, sun: string): Chapter[] {
           <P>
             In NASA experiment <B>{OSDR_STUDIES.muscle.id}</B>, mice on the space station lost muscle and bone in just 33 days of floating. Mars has some gravity (38% of Earth’s), but crews still have to exercise and eat well, which is why food and beds matter as much as air.
           </P>
-          <H>New crew</H>
+          <H>Supply ships and Mission Control</H>
           <P>
-            A <B>supply ship</B> lands at the core every <B>1.5 sols</B> with <B>8 metal</B>. It brings up to <B>4 new colonists</B>, but only if there are <B>free beds</B>, health is at least <B>60%</B> and nothing is running out.
+            A <B>supply ship</B> from Earth lands at the core every <B>1.5 sols</B>. You choose what it brings in <B>Mission Control</B> (the 📡 button at the top left), and every choice has a cost:
+          </P>
+          <Table
+            head={['Order', 'The ship brings']}
+            rows={(Object.keys(CARGO) as Cargo[]).map((k) => [CARGO[k].name, CARGO[k].brings])}
+          />
+          <P>
+            The catch is the <B>communication delay</B>. Your message travels to Earth at the speed of light, and Earth and Mars are so far apart that it takes minutes; in the game, today, about <B>{Math.round(minutes)} seconds</B>. The ship is packed {PACK_LEAD} seconds before it lands, so an order sent too late goes on the ship after. Decide early!
           </P>
           <Tip>Watch the ▲/▼ rates under each stock. A small ▼ on water or food is a warning, not a crisis, as long as you build the next melter or greenhouse before it runs out.</Tip>
         </>
@@ -525,6 +537,9 @@ function chapters(art: Art, sun: string): Chapter[] {
           <H>Dust storms</H>
           <P>
             Every few sols a <B className="text-[#e0a072]">dust storm</B> rolls in for about half a sol. Solar panels lose most of their output, so stored power and reactors carry the colony. The “Self-cleaning panels” research halves the loss.
+          </P>
+          <P>
+            Mission Control on Earth watches the weather and sends a warning, but it takes the signal delay to arrive. When Mars is far from Earth, you get less time to get ready, so keep your batteries charged.
           </P>
           <H>Solar flares</H>
           <P>
@@ -676,12 +691,15 @@ export function HowToPlay({
   doneLabel = 'Got it',
   closeable = true,
   sun = 'the game checks the live feed when you start playing',
+  minutes = lightMinutes(new Date()),
 }: {
   onClose: () => void
   doneLabel?: string
   closeable?: boolean
   /** Where the game's flares come from right now, in words. */
   sun?: string
+  /** Today's one-way signal delay to Earth, in minutes. */
+  minutes?: number
 }) {
   const art = useMemo<Art>(
     () => ({
@@ -691,7 +709,7 @@ export function HowToPlay({
     }),
     [],
   )
-  const list = useMemo(() => chapters(art, sun), [art, sun])
+  const list = useMemo(() => chapters(art, sun, minutes), [art, sun, minutes])
   const [n, setN] = useState(0)
   const last = n === list.length - 1
   const page = list[n]

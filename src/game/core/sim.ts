@@ -45,6 +45,8 @@ import {
   OutdatedSaveError,
   SAVE_VERSION,
   type BeltItem,
+  type Cargo,
+  type CargoOrder,
   type Ent,
   type Msg,
   type Outlet,
@@ -62,6 +64,17 @@ export * from '@/game/core/world'
 /* -------------------------------- tuning -------------------------------- */
 
 /** Minimum spacing between items on a belt or junction lane (in tile lengths). */
+/** Seconds before landing that a supply ship is packed: an order has to reach Earth by then. */
+export const PACK_LEAD = 30
+/** Seconds of warning Mission Control gives of a dust storm when it sends the forecast; the signal delay eats into it. */
+export const STORM_FORECAST = 40
+/** What each kind of cargo brings (crew also needs free beds and a stable colony). */
+export const CARGO: Record<Cargo, { name: string; brings: string }> = {
+  crew: { name: 'New crew', brings: 'up to 4 colonists (if there are free beds and nothing is running out) and 8 metal' },
+  materials: { name: 'Building materials', brings: '24 metal and 12 bricks, but no new crew' },
+  supplies: { name: 'Food and water', brings: '16 food and 16 water, but no new crew' },
+}
+
 /** Minimum spacing between items on a belt, in tiles. */
 const GAP = 0.3
 /** Items a junction lane holds: as many as fit at GAP spacing across one tile. */
@@ -851,6 +864,47 @@ export class Sim {
     return { live: this.flarePool.live, count: this.flarePool.recs.length }
   }
 
+  /**
+   * Signal delay to Earth, in game seconds one way (one real light-minute = one second).
+   * The store sets it from where the planets really are today; 12 is roughly the average.
+   */
+  commsDelay = 12
+
+  /** Set the delay from a real one-way light time in minutes. */
+  setCommsDelay(lightMinutes: number) {
+    if (Number.isFinite(lightMinutes)) this.commsDelay = Math.max(3, Math.min(23, lightMinutes))
+  }
+
+  /** The supply-ship order: see `CargoOrder`. */
+  cargo: CargoOrder = { want: 'crew', sentAt: -999, atEarth: 'crew', packed: null }
+
+  /** Ask Mission Control for different cargo. The message takes the signal delay to reach Earth. */
+  orderCargo(c: Cargo) {
+    if (c === this.cargo.want) return
+    this.cargo.want = c
+    this.cargo.sentAt = this.time
+    this.log(`Message sent to Mission Control: “Please send ${CARGO[c].name.toLowerCase()}.” It reaches Earth in ${Math.round(this.commsDelay)} s.`, 'info')
+  }
+
+  /** How the order and the next ship stand, for the HUD. */
+  commsStatus() {
+    const reach = this.cargo.sentAt + this.commsDelay
+    const packAt = this.ev.nextShip - PACK_LEAD
+    return {
+      delay: this.commsDelay,
+      want: this.cargo.want,
+      atEarth: this.cargo.atEarth,
+      packed: this.cargo.packed,
+      /** Seconds until your latest message reaches Earth (0 if it has). */
+      reachesIn: Math.max(0, reach - this.time),
+      /** Seconds until the next ship is packed (0 once it is). */
+      packIn: Math.max(0, packAt - this.time),
+      landIn: Math.max(0, this.ev.nextShip - this.time),
+      /** Will your latest order make the next ship? */
+      inTime: this.cargo.packed === null ? reach <= packAt : false,
+    }
+  }
+
   /** Has the space-weather card been shown this game? */
   private toldFlares = false
 
@@ -1420,10 +1474,15 @@ export class Sim {
     const t = this.time
     const ev = this.ev
     // dust storms
-    if (!ev.storm && t >= ev.nextStorm - 25) {
+    // the forecast comes from Mission Control on Earth, so the signal delay eats into the warning
+    const lead = Math.max(5, STORM_FORECAST - this.commsDelay)
+    if (!ev.storm && t >= ev.nextStorm - lead) {
       const len = SOL * (0.45 + this.rng() * 0.35)
       ev.storm = { start: ev.nextStorm, end: ev.nextStorm + len }
-      this.log('Dust storm approaching! Solar output will drop. Charge your batteries.', 'warn')
+      this.log(
+        `Mission Control: dust storm in about ${Math.round(lead)} s! Solar power will drop, so charge your batteries. (Their warning took ${Math.round(this.commsDelay)} s to reach you.)`,
+        'warn',
+      )
     }
     if (ev.storm && t >= ev.storm.end) {
       ev.storm = null
@@ -1457,19 +1516,41 @@ export class Sim {
       ev.nextFlare = t + SOL * (2.5 + this.rng() * 2.5)
       this.log('Radiation levels back to normal.', 'info')
     }
-    // supply ships
+    // supply ships: your order reaches Earth after the signal delay; the ship is packed with
+    // whatever Mission Control has received by then
+    const cg = this.cargo
+    if (cg.want !== cg.atEarth && t >= cg.sentAt + this.commsDelay) {
+      cg.atEarth = cg.want
+      this.log(`Mission Control received your order: ${CARGO[cg.want].name.toLowerCase()}.`, 'info')
+    }
+    if (cg.packed === null && t >= ev.nextShip - PACK_LEAD) {
+      cg.packed = cg.atEarth
+      this.log(`Mission Control: the next supply ship is packed with ${CARGO[cg.packed].name.toLowerCase()} and lands in ${PACK_LEAD} s.`, 'info')
+    }
     if (t >= ev.nextShip) {
       ev.nextShip = t + SOL * 1.5
       ev.ship = t
-      const free = this.housing() - this.colonists
-      const stable = this.health >= 60 && !this.shortages.has('food') && !this.shortages.has('water') && !this.shortages.has('o2')
-      this.stock.metal += 8
-      if (free > 0 && stable) {
-        const n = Math.min(4, free)
-        this.colonists += n
-        this.log(`Supply ship landed: ${n} new colonist${n > 1 ? 's' : ''} and 8 metal.`, 'good')
-      } else if (!stable) this.log('Supply ship landed with 8 metal. Crew stayed aboard — the colony isn’t stable yet.', 'warn')
-      else this.log('Supply ship landed with 8 metal. No free housing, so no new crew. Build habitats!', 'warn')
+      const cargo = cg.packed ?? cg.atEarth
+      cg.packed = null
+      if (cargo === 'materials') {
+        this.stock.metal += 24
+        this.stock.brick += 12
+        this.log('Supply ship landed with 24 metal and 12 bricks.', 'good')
+      } else if (cargo === 'supplies') {
+        this.stock.food += 16
+        this.stock.water += 16
+        this.log('Supply ship landed with 16 food and 16 water.', 'good')
+      } else {
+        const free = this.housing() - this.colonists
+        const stable = this.health >= 60 && !this.shortages.has('food') && !this.shortages.has('water') && !this.shortages.has('o2')
+        this.stock.metal += 8
+        if (free > 0 && stable) {
+          const n = Math.min(4, free)
+          this.colonists += n
+          this.log(`Supply ship landed: ${n} new colonist${n > 1 ? 's' : ''} and 8 metal.`, 'good')
+        } else if (!stable) this.log('Supply ship landed with 8 metal. Crew stayed aboard — the colony isn’t stable yet.', 'warn')
+        else this.log('Supply ship landed with 8 metal. No free housing, so no new crew. Build habitats!', 'warn')
+      }
     }
   }
 
@@ -1539,6 +1620,7 @@ export class Sim {
       over: this.over,
       tips: [...this.tips],
       rng: this.rngState,
+      cargo: { ...this.cargo },
       wear: [...this.wear].flatMap((w, k) => (w ? [[k, w] as [number, number]] : [])),
     }
   }
@@ -1605,6 +1687,11 @@ export class Sim {
       nextFlare: num(ev.nextFlare, s.ev.nextFlare),
       nextShip: num(ev.nextShip, s.ev.nextShip),
       ship: num(ev.ship, -1),
+    }
+    {
+      const c = obj(d.cargo)
+      const kind = (x: unknown): Cargo | null => (x === 'crew' || x === 'materials' || x === 'supplies' ? x : null)
+      s.cargo = { want: kind(c.want) ?? 'crew', sentAt: num(c.sentAt, -999), atEarth: kind(c.atEarth) ?? 'crew', packed: kind(c.packed) }
     }
 
     for (const p of arr(d.wear)) {

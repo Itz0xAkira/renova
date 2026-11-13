@@ -197,6 +197,12 @@ export const SOURCES: Source[] = [
     use: 'The Viking colour map of Mars in the guide, with the landing site. Archived.',
   },
   {
+    name: 'Approximate Positions of the Planets',
+    by: 'NASA JPL',
+    link: 'https://ssd.jpl.nasa.gov/planets/approx_pos.html',
+    use: 'Where Earth and Mars are on today’s date, which sets the real signal delay to Mission Control (about 3 to 22 minutes). Worked out live from the date.',
+  },
+  {
     name: 'Food production on the Moon and in remote areas',
     by: 'Canadian Space Agency',
     link: 'https://www.asc-csa.gc.ca/eng/youth-educators/toolkits/food-production/',

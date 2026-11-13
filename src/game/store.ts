@@ -6,12 +6,13 @@
 import { type Dir, type Kind } from '@/game/core/data'
 import { OutdatedSaveError, Sim, type Ent, type SaveData } from '@/game/core/sim'
 import { fetchRecentFlares, type FlareRecord } from '@/game/core/nasa'
+import { earthMarsKm, lightMinutes, sunAngle } from '@/game/core/orbits'
 
 const SAVE_KEY = 'renova-save-v1'
 /** Where an unreadable save is kept, so a bad save never crashes the game twice and nothing is silently lost. */
 const BROKEN_KEY = 'renova-save-broken'
 
-export type Panel = null | 'research' | 'menu' | 'help' | 'power'
+export type Panel = null | 'research' | 'menu' | 'help' | 'power' | 'comms'
 
 export type UIState = {
   tool: Kind | null
@@ -94,6 +95,8 @@ export class GameStore {
       }
     }
     this.sim = sim ?? GameStore.fresh()
+    // today's real Earth–Mars signal delay
+    this.applySpaceWeather()
     // brand-new players start with the guide open
     if (!sim) {
       this.firstRun = true
@@ -249,7 +252,16 @@ export class GameStore {
     this.bump()
   }
 
+  /** Where Earth and Mars really are today: distance, one-way signal time, and the Sun–Earth–Mars angle. */
+  space = GameStore.today()
+
+  static today() {
+    const now = new Date()
+    return { date: now, km: earthMarsKm(now), minutes: lightMinutes(now), sunAngle: sunAngle(now) }
+  }
+
   private applySpaceWeather() {
+    this.sim.setCommsDelay(this.space.minutes)
     if (this.spaceWeather.status === 'live') this.sim.setFlarePool(this.spaceWeather.recs, true)
   }
 

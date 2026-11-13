@@ -13,6 +13,7 @@ import { Missions } from './hud/Missions'
 import { Menu } from './hud/panels/Menu'
 import { PopupCard } from './hud/panels/PopupCard'
 import { PowerPanel } from './hud/panels/PowerPanel'
+import { CommsPanel } from './hud/panels/Comms'
 import { Research } from './hud/panels/Research'
 import { TopBar } from './hud/TopBar'
 import { useHotkeys } from './hud/useHotkeys'
@@ -57,6 +58,7 @@ export function Hud({ store }: { store: GameStore }) {
       {ui.panel === 'research' && <Research store={store} />}
       {ui.panel === 'menu' && <Menu store={store} />}
       {ui.panel === 'power' && <PowerPanel store={store} />}
+      {ui.panel === 'comms' && <CommsPanel store={store} />}
       {popup && (
         <div className="absolute inset-0 z-30">
           <PopupCard store={store} />

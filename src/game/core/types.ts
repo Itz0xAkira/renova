@@ -17,6 +17,16 @@ export type BeltItem = { item: ItemId; pos: number; from?: Dir; v?: number }
  */
 export type Outlet = { i: number; j: number; dir: Dir; kind: 'belt' | 'junction' | 'building' }
 
+/** What a supply ship brings: new crew (and a little metal), building materials, or food and water. */
+export type Cargo = 'crew' | 'materials' | 'supplies'
+
+/**
+ * The supply-ship order: what you asked for (`want`, sent at `sentAt`), what Mission Control
+ * has received so far (`atEarth`; your message takes the signal delay to get there), and what
+ * the next ship was packed with (null until it's packed).
+ */
+export type CargoOrder = { want: Cargo; sentAt: number; atEarth: Cargo; packed: Cargo | null }
+
 /** Belt input bits: fed from behind, from the +b side ((dir+1)%4), from the −b side ((dir+3)%4). */
 export const IN_BACK = 1
 export const IN_P = 2
@@ -159,6 +169,8 @@ export type SaveData = {
   tips: string[]
   /** Event generator state, so storms and flares continue the same sequence. */
   rng: number
+  /** The supply-ship order (older saves: crew). */
+  cargo?: CargoOrder
   /** Ground wear from rovers and crew, as sparse [tile index, wear] pairs. */
   wear: [number, number][]
 }

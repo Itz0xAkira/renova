@@ -42,6 +42,14 @@ export function TopBar({ store }: { store: GameStore }) {
           </p>
         )}
         <SunData store={store} />
+        <button
+          type="button"
+          onClick={() => store.setPanel('comms')}
+          className={`${panel} flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-[#9fe3f5] hover:border-[#65C9E8]`}
+          title={`Signal delay to Earth today: ${store.space.minutes.toFixed(1)} minutes each way. Click for Mission Control and your supply-ship order.`}
+        >
+          <Icon name="comms" size={18} /> {Math.round(store.space.minutes)} min to Earth
+        </button>
         {flare && (
           <p className={`${panel} flex animate-pulse items-center gap-1.5 border-[#B03E53] px-2 py-1.5 text-[#F3A6B6]`}>
             <Icon name="warn" /> Solar flare
