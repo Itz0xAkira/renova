@@ -17,6 +17,7 @@ import { BEAM_AX, BEAM_AY, BEAM_H, BEAM_W, ROVER_HALF_LENGTH, ROVER_AX, ROVER_AY
 import { BUILDINGS, MAP, type Dir } from '@/game/core/data'
 import type { Ent, Sim } from '@/game/core/sim'
 import { CORE_PLINTH, coreLayout, nearCore, type CoreLayout } from '@/game/render/coreLayout'
+import { DRONE_AX, DRONE_AY, DRONE_W, DRONE_H } from '@/game/art/v2/drone'
 import { setDep, setTex } from '@/game/render/display'
 import { centreX, centreY, DEPTH, depthFor, inFront, screenOverlap, unitDepth, type Box } from '@/game/render/iso'
 
@@ -207,7 +208,7 @@ export class Units {
     while (this.drones.length < n) {
       const k = this.drones.length
       this.drones.push({
-        img: this.scene.add.image(hx, hy, 'drone_0').setOrigin(11 / 22, 11 / 14).setDepth(DEPTH.air),
+        img: this.scene.add.image(hx, hy, 'drone_0').setOrigin(DRONE_AX / DRONE_W, DRONE_AY / DRONE_H).setDepth(DEPTH.air),
         sh: this.scene.add.image(hx, hy, 'drone_shadow').setDepth(DEPTH.unitShadow),
         x: hx,
         y: hy,

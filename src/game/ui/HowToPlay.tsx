@@ -326,7 +326,7 @@ function chapters(art: Art, sun: string, minutes: number): Chapter[] {
           </P>
           <H>Sizes</H>
           <P>
-            Buildings are big. Machines take <B>2×2</B> or <B>3×3</B> tiles, the greenhouse <B>4×3</B>. Belts, junctions and pylons take a single tile. Nothing can be built on <B>grey boulders</B> or in <B>craters</B>.
+            Buildings are big, and they spread out rather than up: building tall on Mars is hard. Solar panels and shields take <B>2×2</B> tiles, miners and small plants <B>3×3</B>, factories <B>4×4</B>, the reactor and the colony core <B>5×5</B>, and the greenhouse <B>6×4</B> and habitat <B>6×6</B>. Belts, junctions and pylons take a single tile. Nothing can be built on <B>grey boulders</B> or in <B>craters</B>.
           </P>
           <H>Plugging in belts</H>
           <P>

@@ -53,13 +53,13 @@ export function noise(x: number, y: number, scale: number, seed: number) {
 export const CORE_AT = Math.floor((MAP - BUILDINGS.core.w) / 2)
 /**
  * Centre of the core's footprint in tile-index coordinates, the same convention the grid
- * uses for building centres (i + (w − 1) / 2): 47 for a 3×3 core at 46. Use it for
+ * uses for building centres (i + (w − 1) / 2): 47 for a 5×5 core at 45. Use it for
  * distances and the camera's home instead of `CORE_AT + 0.5`.
  */
 export const CORE_CENTRE = CORE_AT + (BUILDINGS.core.w - 1) / 2
 
 /**
- * Ground for a seed. Deposits are sized for 2×2 miners and 3×3 buildings: ice and ore
+ * Ground for a seed. Deposits are sized for 3×3 miners and 4×4 buildings: ice and ore
  * come in broad patches, boulders and craters are single scattered tiles, the core sits
  * on a clear pad, and there is starter ice and ore inside the core's power square.
  */
@@ -86,9 +86,9 @@ export function generateGround(seed: number): Ground[] {
       for (let i = Math.floor(ci - r); i <= Math.ceil(ci + r); i++)
         if (i >= 0 && j >= 0 && i < MAP && j < MAP && Math.hypot(i - ci, j - cj) <= r) g[j * MAP + i] = t
   }
-  blob(c + 10, c - 1.5, 'ice', 2.8)
-  blob(c - 3, c + 11, 'ore', 2.8)
-  blob(c - 11, c - 6, 'ice', 2)
+  blob(c + 10, c - 1.5, 'ice', 3.4)
+  blob(c - 3, c + 11, 'ore', 3.4)
+  blob(c - 11, c - 6, 'ice', 2.6)
   return g
 }
 
@@ -98,8 +98,8 @@ export function generateGround(seed: number): Ground[] {
  * The tile a building pushes its output onto: just past the middle of the
  * footprint edge its arrow faces. For 1×1 buildings that's simply the
  * neighbour in direction `dir`; on an even edge (2 or 4 tiles) it is the
- * tile just before the middle (lower i / lower j), e.g. a 4×3 greenhouse
- * facing +j outputs below its second column.
+ * tile just before the middle (lower i / lower j), e.g. a 6×4 greenhouse
+ * facing +j outputs below its third column.
  */
 export function outTileFor(kind: Kind, i: number, j: number, dir: Dir): [number, number] {
   const { w, h } = BUILDINGS[kind]

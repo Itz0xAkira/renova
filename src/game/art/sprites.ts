@@ -10,13 +10,30 @@
  */
 import { box, C, diamond, diamondOutline, ellipseRows, rect, walker, type Ctx } from '@/site/pixel/engine'
 import { BUILDINGS, ITEMS, type Dir, type ItemId, type Kind } from '@/game/core/data'
-import { dustApron, setTier } from '@/game/art/pixel'
-import { battery, berm, bigGreenhouse, bigHabitat, bigKiln, bigLab, bigReactor, bigSmelter, bigWasher, coreBuilding, excavator, iceDrill, melter, moxie, pylon, rocket, solarArray, upgradeKit } from '@/game/art/structures'
+import { setTier } from '@/game/art/pixel'
+import { habitatV2 } from '@/game/art/v2/habitat'
+import { coreV2 } from '@/game/art/v2/core'
+import { drillV2 } from '@/game/art/v2/drill'
+import { excavatorV2 } from '@/game/art/v2/excavator'
+import { melterV2 } from '@/game/art/v2/melter'
+import { smelterV2 } from '@/game/art/v2/smelter'
+import { kilnV2 } from '@/game/art/v2/kiln'
+import { washerV2 } from '@/game/art/v2/washer'
+import { greenhouseV2 } from '@/game/art/v2/greenhouse'
+import { moxieV2 } from '@/game/art/v2/moxie'
+import { shieldV2 } from '@/game/art/v2/shield'
+import { solarV2 } from '@/game/art/v2/solar'
+import { pylonV2 } from '@/game/art/v2/pylon'
+import { batteryV2 } from '@/game/art/v2/battery'
+import { reactorV2 } from '@/game/art/v2/reactor'
+import { labV2 } from '@/game/art/v2/lab'
+import { droneCanvas } from '@/game/art/v2/drone'
+import { rocket, upgradeKit } from '@/game/art/structures'
 import { canvas, FRAMES, line } from '@/game/art/canvas'
 
 export { FRAMES } from '@/game/art/canvas'
 import { arrowCanvas, bayCanvas, beltCanvas, beltKey, itemCanvas, junctionCanvas, PORT_AX, PORT_AY, PORT_H, PORT_W, portCanvas, roadCanvas } from '@/game/art/logistics'
-import { lit, outlineOf, shadeLayer, shadowOf, weatherLayer } from '@/game/art/passes'
+import { lit, outlineOf, shadeLayer, shadowOf } from '@/game/art/passes'
 import { beaconCanvas, beamCanvas, dustCanvas, ROVER_H, ROVER_W, ROVER_WHEEL_FRAMES, roverCanvas, roverShadowCanvas } from '@/game/art/rovers'
 
 export { beltKey, PORT_AX, PORT_AY, PORT_H, PORT_W } from '@/game/art/logistics'
@@ -51,7 +68,7 @@ export function drawKind(ctx: Ctx, kind: Kind, x: number, y: number, t: number, 
   const tier = opt.tier ?? 1
   setTier(tier)
   try {
-    if (tier > 1 && kind !== 'solar' && kind !== 'pylon' && kind !== 'excavator' && kind !== 'shield') upgradeKit(ctx, x, y, BUILDINGS[kind].w, BUILDINGS[kind].h, t, tier)
+    if (tier > 1 && !CLEAN.has(kind) && kind !== 'solar' && kind !== 'pylon' && kind !== 'excavator' && kind !== 'shield') upgradeKit(ctx, x, y, BUILDINGS[kind].w, BUILDINGS[kind].h, t, tier)
     drawKindInner(ctx, kind, x, y, t, opt, tier)
   } finally {
     setTier(1)
@@ -61,37 +78,37 @@ export function drawKind(ctx: Ctx, kind: Kind, x: number, y: number, t: number, 
 function drawKindInner(ctx: Ctx, kind: Kind, x: number, y: number, t: number, opt: { dim?: boolean; level?: number }, tier: number) {
   switch (kind) {
     case 'pylon':
-      return pylon(ctx, x, y, t, tier)
+      return pylonV2(ctx, x, y, t, tier)
     case 'drill':
-      return iceDrill(ctx, x, y, t)
+      return drillV2(ctx, x, y, t, tier)
     case 'excavator':
-      return excavator(ctx, x, y, t)
+      return excavatorV2(ctx, x, y, t, tier)
     case 'melter':
-      return melter(ctx, x, y, t, opt.level ?? 0.5)
+      return melterV2(ctx, x, y, t, opt.level ?? 0.5, tier)
     case 'smelter':
-      return bigSmelter(ctx, x, y, t)
+      return smelterV2(ctx, x, y, t, tier)
     case 'kiln':
-      return bigKiln(ctx, x, y, t)
+      return kilnV2(ctx, x, y, t, tier)
     case 'washer':
-      return bigWasher(ctx, x, y, t)
+      return washerV2(ctx, x, y, t, tier)
     case 'greenhouse':
-      return bigGreenhouse(ctx, x, y, t, !!opt.dim)
+      return greenhouseV2(ctx, x, y, t, !!opt.dim, tier)
     case 'moxie':
-      return moxie(ctx, x, y, t)
+      return moxieV2(ctx, x, y, t, tier)
     case 'habitat':
-      return bigHabitat(ctx, x, y, t)
+      return habitatV2(ctx, x, y, t, tier)
     case 'shield':
-      return berm(ctx, x, y, t)
+      return shieldV2(ctx, x, y, t, tier)
     case 'solar':
-      return solarArray(ctx, x, y, t, tier)
+      return solarV2(ctx, x, y, t, tier)
     case 'battery':
-      return battery(ctx, x, y, t)
+      return batteryV2(ctx, x, y, t, tier)
     case 'reactor':
-      return bigReactor(ctx, x, y, t)
+      return reactorV2(ctx, x, y, t, tier)
     case 'lab':
-      return bigLab(ctx, x, y, t)
+      return labV2(ctx, x, y, t, tier)
     case 'core':
-      return coreBuilding(ctx, x, y, t)
+      return coreV2(ctx, x, y, t)
     case 'belt':
       return
   }
@@ -141,15 +158,15 @@ function iconCanvas(name: string) {
 /* -------------------------------- baking -------------------------------- */
 
 
-/** Buildings that stand on a regolith pad (all but the pylon), so loose dust spills off its edges. */
-const PADDED = new Set<Kind>(['core', 'drill', 'excavator', 'melter', 'smelter', 'kiln', 'washer', 'greenhouse', 'moxie', 'habitat', 'shield', 'solar', 'battery', 'reactor', 'lab'])
+/** Buildings redrawn in the clean isometric style: flat shading, no weathering, plum outlines, their own upgrades. */
+export const CLEAN = new Set<Kind>(['habitat', 'core', 'drill', 'excavator', 'melter', 'smelter', 'kiln', 'washer', 'greenhouse', 'moxie', 'shield', 'solar', 'pylon', 'battery', 'reactor', 'lab'])
 
 /** The bare structure: lit, no slab, no outline. */
 function structure(kind: Kind, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
   const big = isBig(kind)
   const { W, H, ax, ay } = spriteSpec(kind)
   const layer = canvas(W, H, (ctx) => drawKind(ctx, kind, ax, ay, t, opt))
-  shadeLayer(layer, ax, ay, big ? 30 : 14)
+  if (!CLEAN.has(kind)) shadeLayer(layer, ax, ay, big ? 30 : 14)
   if (process.env.NODE_ENV !== 'production') {
     // anything wider than the tile would overlap its neighbours
     const d = layer.getContext('2d')!.getImageData(0, 0, W, H).data
@@ -169,12 +186,11 @@ function structure(kind: Kind, t: number, opt: { dim?: boolean; level?: number; 
 
 /** A finished building sprite: dark outline plus the lit structure. Slab and shadow live on the ground layer. */
 function buildingCanvas(kind: Kind, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
-  const { W, H, ax, ay } = spriteSpec(kind)
+  const { W, H } = spriteSpec(kind)
   const layer = structure(kind, t, opt)
   return canvas(W, H, (ctx) => {
-    ctx.drawImage(outlineOf(layer), 0, 0)
+    ctx.drawImage(outlineOf(layer, CLEAN.has(kind)), 0, 0)
     ctx.drawImage(layer, 0, 0)
-    if (PADDED.has(kind)) dustApron(ctx, ax, ay, BUILDINGS[kind].w, BUILDINGS[kind].h)
   })
 }
 
@@ -230,32 +246,8 @@ export function bakeAll(add: TextureSink) {
   for (let f = 0; f < FRAMES; f++) add(`junction_${f}`, junctionCanvas(f))
   for (const n of Object.keys(ICONS)) add(`icon_${n}`, iconCanvas(n))
   add('hover', canvas(34, 18, (ctx) => diamondOutline(ctx, 17, 1, 16, '#fff7e8')))
-  // construction drone: an X-frame quadcopter with four rotor discs; body centre at (11, 9)
-  for (let f = 0; f < 2; f++)
-    add(
-      `drone_${f}`,
-      lit(22, 14, 11, 11, (ctx) => {
-        const rotors: [number, number][] = [
-          [4, 6],
-          [18, 6],
-          [7, 10],
-          [15, 10],
-        ]
-        // arms
-        for (const [rx, ry] of rotors) line(ctx, 11, 8, rx, ry, C.ink2)
-        // body: dark shell, orange stripe, status light
-        box(ctx, 11, 5, 4, 2, '#5b6270', '#3a4150', '#262c38', false)
-        rect(ctx, 8, 9, 7, 1, C.orange)
-        rect(ctx, 10, 5, 2, 1, f ? C.green : '#2f7a3a')
-        // rotor discs, blades blurred in two alternating poses
-        for (const [rx, ry] of rotors) {
-          ellipseRows(ctx, rx, ry - 1, 3, 1, '#c3cad3')
-          if (f === 0) rect(ctx, rx - 3, ry - 1, 7, 1, '#f4f7fa')
-          else rect(ctx, rx - 1, ry - 2, 3, 3, '#f4f7fa')
-          rect(ctx, rx, ry - 1, 1, 1, C.ink)
-        }
-      }),
-    )
+  // construction drone: a white quadcopter with a cargo pod (art/v2/drone.ts)
+  for (let f = 0; f < 2; f++) add(`drone_${f}`, droneCanvas(f))
   add('drone_shadow', canvas(18, 8, (ctx) => {
     ellipseRows(ctx, 9, 4, 8, 3, '#2a1012')
   }))
@@ -276,8 +268,8 @@ export function bakeAll(add: TextureSink) {
   for (const d of [0, 1, 2, 3] as Dir[]) {
     for (const loaded of [false, true])
       for (let f = 0; f < ROVER_WHEEL_FRAMES; f++) {
-        const body = weatherLayer(roverCanvas(d, f, loaded))
-        add(roverKey(d, f, loaded), canvas(ROVER_W, ROVER_H, (ctx) => (ctx.drawImage(outlineOf(body), 0, 0), ctx.drawImage(body, 0, 0))))
+        const body = roverCanvas(d, f, loaded)
+        add(roverKey(d, f, loaded), canvas(ROVER_W, ROVER_H, (ctx) => (ctx.drawImage(outlineOf(body, true), 0, 0), ctx.drawImage(body, 0, 0))))
       }
     add(`rover_sh_${d}`, roverShadowCanvas(d))
     add(`rover_beam_${d}`, beamCanvas(d))

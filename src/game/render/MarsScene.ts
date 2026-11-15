@@ -90,7 +90,7 @@ export class MarsScene extends Phaser.Scene {
 
     const cam = this.cameras.main
     cam.setRoundPixels(true)
-    // buildings are big now (a 3×3 core): 2× shows the colony's heart on a desktop, 1× on a phone
+    // buildings are big now (a 5×5 core): 2× shows the colony's heart on a desktop, 1× on a phone
     this.store.ui.zoom = window.innerWidth < 520 ? 1 : 2
     cam.setZoom(this.store.ui.zoom)
     // keep the map in view: the camera can't be panned off into empty space

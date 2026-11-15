@@ -4,11 +4,11 @@ import { CORE_CENTRE } from '@/game/core/sim'
 import { c, check, clean, must } from './helpers'
 
 const s = clean()
-// inside the core's area (CORE_REACH tiles out from the 3×3 footprint)
-check(s.gridSource('solar', c + 3 + CORE_REACH - 2, c)?.kind === 'core', 'a spot inside the core’s area is powered by the core')
+// inside the core's area (CORE_REACH tiles out from the 5×5 footprint's edge, which ends at c + 4)
+check(s.gridSource('solar', c + 5 + CORE_REACH - 2, c)?.kind === 'core', 'a spot inside the core’s area is powered by the core')
 // a footprint with just one tile inside still counts
-check(s.gridSource('solar', c + 3 + CORE_REACH - 1, c)?.kind === 'core', 'one tile inside the area is enough')
-check(s.gridSource('solar', c + 3 + CORE_REACH, c) === null, 'just outside the core’s area is unpowered')
+check(s.gridSource('solar', c + 5 + CORE_REACH - 1, c)?.kind === 'core', 'one tile inside the area is enough')
+check(s.gridSource('solar', c + 5 + CORE_REACH, c) === null, 'just outside the core’s area is unpowered')
 
 // a pylon within cable reach of the core links to it; one beyond doesn't, and says how far off it is
 const near = s.pylonLink(CORE_CENTRE + CORE_LINK - 1, CORE_CENTRE)

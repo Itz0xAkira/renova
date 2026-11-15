@@ -5,21 +5,21 @@ import { c, check, clean, must, run } from './helpers'
 // step(0) and bad dt are ignored instead of poisoning machines with NaN
 {
   const s = clean()
-  must(s.place('excavator', c + 4, c, 2))
+  must(s.place('excavator', c + 6, c, 2))
   s.time = 24
   for (const dt of [0, -1, NaN, Infinity]) s.step(dt)
   run(s, 10)
-  const ex = s.entAt(c + 4, c)!
+  const ex = s.entAt(c + 6, c)!
   check(Number.isFinite(ex.progress) && Number.isFinite(s.power.sat) && s.time === 34, `NaN after bad dt: ${ex.progress} ${s.power.sat} ${s.time}`)
 }
 
 // upgrade messages, and removing an upgraded building refunds what was spent on it
 {
   const s = clean()
-  must(s.place('belt', c + 3, c + 3, 0))
-  check(s.upgrade(s.entAt(c + 3, c + 3)!) === 'Conveyor belts can’t be upgraded', 'non-upgradable message')
-  must(s.place('battery', c + 4, c + 4, 0))
-  const b = s.entAt(c + 4, c + 4)!
+  must(s.place('belt', c + 5, c + 5, 0))
+  check(s.upgrade(s.entAt(c + 5, c + 5)!) === 'Conveyor belts can’t be upgraded', 'non-upgradable message')
+  must(s.place('battery', c + 6, c + 6, 0))
+  const b = s.entAt(c + 6, c + 6)!
   const m0 = s.stock.metal
   const b0 = s.stock.brick
   must(s.upgrade(b))
@@ -29,7 +29,7 @@ import { c, check, clean, must, run } from './helpers'
   const spentB = b0 - s.stock.brick
   const back = s.refundFor(b)
   check(back.metal === spentM && back.brick === spentB, `refund ${JSON.stringify(back)} vs spent ${spentM}/${spentB}`)
-  s.remove(c + 4, c + 4)
+  s.remove(c + 6, c + 6)
   check(s.stock.metal === m0 + 10 && s.stock.brick === b0, 'remove should refund cost and upgrades')
 }
 
@@ -56,12 +56,12 @@ import { c, check, clean, must, run } from './helpers'
 // HUD helpers: generator output and research rate
 {
   const s = clean()
-  must(s.place('solar', c + 3, c + 3, 0))
+  must(s.place('solar', c + 5, c + 5, 0))
   must(s.place('solar', c + 30, c + 30, 0))
-  must(s.place('lab', c - 4, c + 3, 0))
+  must(s.place('lab', c - 4, c + 5, 0))
   s.time = 24
   s.step(0.05)
-  const on = s.entAt(c + 3, c + 3)!
+  const on = s.entAt(c + 5, c + 5)!
   check(Math.abs(s.genKW(on) - SOLAR_KW[0] * s.sun()) < 1e-9 && s.genKW(s.entAt(c + 30, c + 30)!) === 0, 'genKW')
   const rp = s.rp
   const rate = s.researchRate()

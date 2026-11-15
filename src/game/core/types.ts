@@ -98,7 +98,7 @@ export type Shortage = 'food' | 'water' | 'o2' | 'power' | 'radiation' | 'housin
  * Current save format. v3 came with the bigger buildings and the 96-tile map; older
  * layouts can't be carried over, so `Sim.load` refuses them with `OutdatedSaveError`.
  */
-export const SAVE_VERSION = 3
+export const SAVE_VERSION = 4
 
 /** Thrown by `Sim.load` for a save from before the current layout (v1, v2): start a fresh colony. */
 export class OutdatedSaveError extends Error {

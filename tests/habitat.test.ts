@@ -10,7 +10,7 @@ const fed = () => {
 {
   const s = fed()
   must(s.place('habitat', c + 30, c + 25, 0))
-  must(s.place('shield', c + 34, c + 25, 0)) // two tiles of ground between: shielded
+  must(s.place('shield', c + 38, c + 25, 0)) // two tiles of ground between: shielded
   s.colonists = 10
   run(s, 2)
   const h = s.entAt(c + 30, c + 25)!
@@ -39,7 +39,7 @@ const fed = () => {
   const s = fed()
   must(s.place('habitat', c - 9, c, 0)) // unshielded, built first
   must(s.place('habitat', c + 6, c, 0))
-  must(s.place('shield', c + 10, c, 0)) // 2×2, one tile of ground from the habitat
+  must(s.place('shield', c + 13, c, 0)) // 2×2, one tile of ground from the habitat
   s.colonists = 8
   run(s, 1)
   const a = s.entAt(c - 9, c)!
@@ -72,11 +72,11 @@ const fed = () => {
 // shield reach is measured between footprints: 3 tiles at level 1 (two tiles of ground between), more when upgraded
 {
   const s = fed()
-  must(s.place('habitat', c + 6, c + 6, 0)) // tiles c+6..c+8
-  must(s.place('shield', c + 12, c + 6, 0)) // three tiles of ground between: distance 4
+  must(s.place('habitat', c + 6, c + 6, 0)) // tiles c+6..c+11
+  must(s.place('shield', c + 15, c + 6, 0)) // three tiles of ground between: distance 4
   const h = s.entAt(c + 6, c + 6)!
   check(!h.shielded, 'shield 4 tiles away should not reach at level 1')
-  must(s.upgrade(s.entAt(c + 12, c + 6)!))
+  must(s.upgrade(s.entAt(c + 15, c + 6)!))
   check(h.shielded, 'a level-2 shield reaches 4 tiles')
 }
 

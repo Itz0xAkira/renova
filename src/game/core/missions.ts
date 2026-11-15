@@ -1,4 +1,8 @@
 import type { Sim } from '@/game/core/sim'
+import { BUILDINGS, type Kind } from '@/game/core/data'
+
+/** A building's footprint as text, e.g. "4×4", so mission texts never go stale. */
+const size = (k: Kind) => `${BUILDINGS[k].w}×${BUILDINGS[k].h}`
 
 export type Mission = {
   /** Stable id, stored in saves (list positions change when missions are added). */
@@ -78,14 +82,14 @@ export const MISSIONS: Mission[] = [
   {
     id: 'washer',
     title: 'Clean the soil',
-    text: 'Build a soil washer (3×3) and feed it regolith and water from two sides.',
+    text: `Build a soil washer (${size('washer')}) and feed it regolith and water from two sides.`,
     tip: 'Martian soil holds ~0.6% toxic perchlorate. Water rinses it out.',
     check: (s) => has(s, 'washer'),
   },
   {
     id: 'harvest',
     title: 'First harvest',
-    text: 'Build a greenhouse (4×3), feed it clean soil and water, and deliver 10 food.',
+    text: `Build a greenhouse (${size('greenhouse')}), feed it clean soil and water, and deliver 10 food.`,
     tip: 'Greenhouse: 2 soil + 3 water → 4 food. Give each ingredient its own belt.',
     check: (s) => s.delivered.food >= 10,
     progress: (s) => [Math.min(10, s.delivered.food), 10],

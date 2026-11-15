@@ -175,7 +175,7 @@ function weather(d: Uint8ClampedArray, W: number, H: number, ay: number, height:
  * version of the colour it borders, so edges read crisply without a flat
  * brown line around everything.
  */
-export function outlineOf(cv: HTMLCanvasElement) {
+export function outlineOf(cv: HTMLCanvasElement, clean = false) {
   const w = cv.width
   const h = cv.height
   const src = cv.getContext('2d')!.getImageData(0, 0, w, h).data
@@ -183,9 +183,41 @@ export function outlineOf(cv: HTMLCanvasElement) {
     const img = ctx.createImageData(w, h)
     const d = img.data
     const solid = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && src[(y * w + x) * 4 + 3] > 0
+    // the clean style outlines only the outer silhouette: gaps enclosed by the
+    // shape (between lattice struts, under a canopy) stay see-through
+    let outside: Uint8Array | null = null
+    if (clean) {
+      outside = new Uint8Array(w * h)
+      const queue: number[] = []
+      const seed = (x: number, y: number) => {
+        const k = y * w + x
+        if (!outside![k] && !solid(x, y)) {
+          outside![k] = 1
+          queue.push(k)
+        }
+      }
+      for (let x = 0; x < w; x++) {
+        seed(x, 0)
+        seed(x, h - 1)
+      }
+      for (let y = 0; y < h; y++) {
+        seed(0, y)
+        seed(w - 1, y)
+      }
+      while (queue.length) {
+        const k = queue.pop()!
+        const x = k % w
+        const y = (k / w) | 0
+        if (x > 0) seed(x - 1, y)
+        if (x < w - 1) seed(x + 1, y)
+        if (y > 0) seed(x, y - 1)
+        if (y < h - 1) seed(x, y + 1)
+      }
+    }
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         if (solid(x, y)) continue
+        if (outside && !outside[y * w + x]) continue
         // prefer the neighbour below (the edge we're outlining is usually a roof or top)
         const n = [
           [x, y + 1],
@@ -197,9 +229,16 @@ export function outlineOf(cv: HTMLCanvasElement) {
         const s = (n[1] * w + n[0]) * 4
         const o = (y * w + x) * 4
         // a deep, warm version of the colour it borders: dark enough to read, not a black line
-        d[o] = src[s] * 0.26 + 26
-        d[o + 1] = src[s + 1] * 0.2 + 16
-        d[o + 2] = src[s + 2] * 0.2 + 16
+        if (clean) {
+          // the clean style: a deep plum line that keeps a hint of the colour it borders
+          d[o] = src[s] * 0.16 + 36
+          d[o + 1] = src[s + 1] * 0.12 + 22
+          d[o + 2] = src[s + 2] * 0.14 + 40
+        } else {
+          d[o] = src[s] * 0.26 + 26
+          d[o + 1] = src[s + 1] * 0.2 + 16
+          d[o + 2] = src[s + 2] * 0.2 + 16
+        }
         // under the building, where it meets the ground, it's only a soft contact shadow
         d[o + 3] = solid(x, y - 1) && !solid(x, y + 1) ? 120 : 235
       }

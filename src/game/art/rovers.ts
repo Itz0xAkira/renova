@@ -13,7 +13,7 @@
  * turn the tread.
  */
 import { DI, DJ, type Dir } from '@/game/core/data'
-import { INK, RAMP, tone, type Ramp } from '@/game/art/pixel'
+import { INK, RAMP, type Ramp } from '@/game/art/pixel'
 import { canvas } from '@/game/art/canvas'
 
 /** Rover sprites are ROVER_W × ROVER_H with the ground point under the rover's middle at (ROVER_AX, ROVER_AY). */
@@ -353,7 +353,9 @@ function rasterise(W: number, H: number, ax: number, ay: number, dir: Dir, parts
     if (!look) return
     zb[k] = d
     const lit = Math.max(0, n[0] * L[0] + n[1] * L[1] + n[2] * L[2])
-    col[k] = tone(look.ramp, 0.2 + 0.72 * lit + (look.shift ?? 0), px, py)
+    // clean style: flat banded tones, no dithering
+    const b = Math.max(0, Math.min(0.999, 0.2 + 0.72 * lit + (look.shift ?? 0)))
+    col[k] = look.ramp[Math.min(4, Math.floor(b * 4.4))]
   })
   return canvas(W, H, (ctx) => {
     for (let k = 0; k < W * H; k++) {

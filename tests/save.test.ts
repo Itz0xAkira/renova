@@ -87,11 +87,12 @@ import { c, check, must, natural, reload, run } from './helpers'
   check(reload(s).mission === MISSIONS.length, 'all-done round trip')
 }
 
-// saves from the old layout (v1: tuples, v2: small buildings on a 64 map) are refused, not migrated
+// saves from old layouts (v1: tuples, v2: small buildings on a 64 map, v3: the 3×3 core) are refused, not migrated
 {
   const v1 = { v: 1, seed: 42, time: 100, stock: {}, colonists: 4, health: 90, stored: 4500, rp: 3, done: [], current: 'washing', mission: 5, delivered: {}, ents: [['belt', 33, 33, 0]], ev: {}, won: false }
   const v2 = { ...new Sim(42).save(), v: 2 }
-  for (const old of [v1, v2]) {
+  const v3 = { ...new Sim(42).save(), v: 3 }
+  for (const old of [v1, v2, v3]) {
     let err: unknown = null
     try {
       Sim.load(old)
@@ -100,7 +101,7 @@ import { c, check, must, natural, reload, run } from './helpers'
     }
     check(err instanceof OutdatedSaveError && err.version === old.v && err.name === 'OutdatedSaveError', `v${old.v} save should throw OutdatedSaveError`)
   }
-  check(SAVE_VERSION === 3, 'save version')
+  check(SAVE_VERSION === 4, 'save version')
 }
 
 // damaged saves load with defaults; hopeless ones throw
@@ -118,7 +119,7 @@ import { c, check, must, natural, reload, run } from './helpers'
     current: 'teleporters',
     mission: 'no-such-mission',
     ev: { storm: { start: 'x' }, nextShip: NaN },
-    ents: [{ k: 'belt', i: c + 4, j: c + 4, d: 9, it: [['unobtanium', 0.5], ['ice', 7]] }, { k: 'core', i: 0, j: 0, d: 0 }, { k: 'warpgate', i: 1, j: 1, d: 0 }, null, 'x'],
+    ents: [{ k: 'belt', i: c + 6, j: c + 6, d: 9, it: [['unobtanium', 0.5], ['ice', 7]] }, { k: 'core', i: 0, j: 0, d: 0 }, { k: 'warpgate', i: 1, j: 1, d: 0 }, null, 'x'],
     wear: [[5, 300], [-1, 4], 'x'],
   }
   const s = Sim.load(bad)
@@ -127,10 +128,10 @@ import { c, check, must, natural, reload, run } from './helpers'
   check(s.stock.water === 5 && s.stock.metal === 100, 'stock defaults')
   check(s.done.size === 1 && s.current === 'leds', `research ids: ${[...s.done]} / ${s.current}`)
   check(s.mission === 0 && s.ev.storm === null && Number.isFinite(s.ev.nextShip), 'mission / events defaults')
-  const belt = s.entAt(c + 4, c + 4)!
+  const belt = s.entAt(c + 6, c + 6)!
   check(belt.dir === 0 && belt.items.length === 1 && belt.items[0].pos === 1, 'belt sanitised')
   check(s.wear[5] === 255 && Number.isFinite(s.power.stored) && Number.isFinite(s.power.sat), 'wear / power finite')
-  for (const junk of [null, 42, 'save', { v: 4, seed: 1 }, { v: 3 }, { v: 'x', seed: 1 }]) {
+  for (const junk of [null, 42, 'save', { v: 5, seed: 1 }, { v: 4 }, { v: 'x', seed: 1 }]) {
     let err: unknown = null
     try {
       Sim.load(junk)
@@ -141,4 +142,4 @@ import { c, check, must, natural, reload, run } from './helpers'
   }
 }
 
-console.log('OK save v3: stations, live state, lost game, mission ids, old layouts refused, damaged saves')
+console.log('OK save v4: stations, live state, lost game, mission ids, old layouts refused, damaged saves')

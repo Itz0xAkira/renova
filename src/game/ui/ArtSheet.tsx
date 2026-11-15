@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { previewCanvas, spriteSpec } from '@/game/art/sprites'
+import { bakeAll, previewCanvas, spriteSpec } from '@/game/art/sprites'
 import { BUILDINGS, type Kind } from '@/game/core/data'
 
 /**
@@ -39,8 +39,39 @@ function Cell({ kind, tier, t }: { kind: Kind; tier: number; t: number }) {
   return <canvas ref={ref} width={spec.W * ZOOM} height={spec.H * ZOOM} className="pixelated" title={`${kind} level ${tier}`} />
 }
 
+/** `?kind=units`: the rovers (every heading, empty and loaded, first wheel frame) and the drone frames, at 4×. */
+function Units() {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const host = ref.current
+    if (!host) return
+    host.replaceChildren()
+    bakeAll((key, cv) => {
+      if (!/^(rover_\d_0(_l)?|drone_\d)$/.test(key)) return
+      const out = document.createElement('canvas')
+      out.width = cv.width * 4
+      out.height = cv.height * 4
+      const ctx = out.getContext('2d')!
+      ctx.imageSmoothingEnabled = false
+      ctx.fillStyle = '#d99862'
+      ctx.fillRect(0, 0, out.width, out.height)
+      ctx.drawImage(cv, 0, 0, out.width, out.height)
+      out.title = key
+      host.appendChild(out)
+    })
+  }, [])
+  return <div ref={ref} className="flex flex-wrap items-end gap-2" />
+}
+
 export default function ArtSheet() {
   const [q] = useState(() => new URLSearchParams(window.location.search))
+  if (q.get('kind') === 'units')
+    return (
+      <main className="min-h-screen bg-[#3a2018] p-4 font-mono text-xs text-white">
+        <h1 className="mb-3 text-sm">RENOVA art sheet · units</h1>
+        <Units />
+      </main>
+    )
   const only = q.get('kind') as Kind | null
   const t = Number(q.get('t') ?? 0.3)
   const kinds = only ? [only] : KINDS

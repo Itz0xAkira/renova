@@ -264,7 +264,7 @@ export class Iso {
    * other axis and height zc; radius rad tiles. The end facing the viewer gets a cap.
    * pat gets s (px along the axis), th (0 = facing +other axis, π/2 = up) and the brightness.
    */
-  hcyl(axis: 'u' | 'v', a0: number, a1: number, c: number, zc: number, rad: number, ramp: Ramp, o: { pat?: (s: number, th: number, l: number, px: number, py: number) => string | null | undefined; cap?: (rr: number, th: number, l: number) => string | null | undefined } = {}) {
+  hcyl(axis: 'u' | 'v', a0: number, a1: number, c: number, zc: number, rad: number, ramp: Ramp, o: { pat?: (s: number, th: number, l: number, px: number, py: number) => string | null | undefined; cap?: (rr: number, th: number, l: number) => string | null | undefined; glass?: boolean; upper?: boolean; ring?: number } = {}) {
     const rz = rad * KZ
     const nTh = Math.ceil(2 * Math.PI * Math.max(rz, rad * 16) * 2.5)
     const nS = Math.ceil((a1 - a0) * 40)
@@ -274,6 +274,7 @@ export class Iso {
       const si = Math.sin(th)
       const [nu, nv] = axis === 'u' ? [0, co] : [co, 0]
       if (nu * 0.612 + nv * 0.612 + si * 0.5 < -0.08) continue
+      if (o.upper && si < -0.02) continue // a half-tube standing on the ground
       const l = lightN(nu, nv, si)
       for (let i = 0; i <= nS; i++) {
         const a = a0 + ((a1 - a0) * i) / nS
@@ -283,7 +284,7 @@ export class Iso {
         const px = Math.floor(this.X(u, v))
         const py = Math.floor(this.Y(u, v, z))
         const col = o.pat?.((a - a0) * 16, th, l, px, py) ?? tone(ramp, l, px, py)
-        this.put(px, py, u + v + z / 24, col)
+        this.put(px, py, u + v + z / 24, col, o.glass)
       }
     }
     // the end cap facing the viewer
@@ -292,14 +293,16 @@ export class Iso {
     for (let i = 0; i <= nR; i++)
       for (let j = 0; j < nTh; j++) {
         const rr = i / nR
+        if (o.ring !== undefined && rr < o.ring) continue // an open ring, not a disc
         const th = (j / nTh) * 2 * Math.PI
         const u = axis === 'u' ? a1 : c + rad * rr * Math.cos(th)
         const v = axis === 'u' ? c + rad * rr * Math.cos(th) : a1
         const z = zc + rz * rr * Math.sin(th)
+        if (o.upper && Math.sin(th) < -0.02) continue
         const px = Math.floor(this.X(u, v))
         const py = Math.floor(this.Y(u, v, z))
         const col = o.cap?.(rr, th, lc) ?? (rr > 0.86 ? ramp[axis === 'u' ? 1 : 3] : tone(ramp, lc + 0.08, px, py))
-        this.put(px, py, u + v + z / 24, col)
+        this.put(px, py, u + v + z / 24, col, o.glass)
       }
   }
   /** Paint the buffers onto the canvas. */
@@ -671,7 +674,7 @@ export function moxie(ctx: Ctx, x: number, y: number, t: number) {
 /* -------------------------------- habitat ------------------------------- */
 
 /** An EVA suit seen from the front: white, gold visor, orange chest panel. 5×10. */
-const SUIT = ['.hhh.', 'hvvvs', '.hhs.', 'wwwws', 'wokws', 'wwwws', '.wws.', '.w.s.', '.w.s.', '.d.d.']
+export const SUIT = ['.hhh.', 'hvvvs', '.hhs.', 'wwwws', 'wokws', 'wwwws', '.wws.', '.w.s.', '.w.s.', '.d.d.']
 
 /**
  * Habitat (3×3): a big white inflatable dome, its fabric gores sewn with seam
