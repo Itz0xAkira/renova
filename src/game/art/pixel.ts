@@ -46,6 +46,13 @@ export const INK = '#151618'
 /** The bright core of cyan glow. */
 export const GLOW = '#C9F4FF'
 
+/** Stable per-pixel noise (0–1). */
+export const noise = (a: number, b: number, s = 0) => {
+  let h = Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(s | 0, 1442695041)
+  h = Math.imul(h ^ (h >>> 13), 1274126177)
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+}
+
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((n) => (n + 0.5) / 16)
 const bayer = (x: number, y: number) => BAYER[(y & 3) * 4 + (x & 3)]
 
@@ -249,6 +256,7 @@ const TIER_TRIM = [RAMP.rust, RAMP.signal, RAMP.cyan] as const
 
 export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P = 5, trimOverride?: Ramp) {
   const trim = trimOverride ?? TIER_TRIM[TIER - 1]
+  const ringOn = TIER > 1 || !!trimOverride // a plain level-1 pad has no painted trim
   const inset = 0.06
   const at = (px: number, py: number) => {
     const dx = px + 0.5 - cx
@@ -260,8 +268,12 @@ export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P
   const frontX = cx + (w - h) * 8
   const rx = (w + h) * 8 + 1
   const ry = (w + h) * 4 + 2
-  // a sintered-regolith concrete pad: warm grey, dusty toward the edges
-  const M = RAMP.stone
+  // A pad of sintered regolith (Mars soil baked hard) sitting on a bank of packed
+  // red dirt, so the building grows out of the ground instead of standing on a box.
+  const PAD: Ramp = ['#6f4a3c', '#8d6550', '#a87d63', '#bf957a', '#d3ad90']
+  const DIRT: Ramp = ['#5a2b1f', '#7d4029', '#9e5836', '#c07448', '#d99862']
+  const DUST: Ramp = ['#a1593a', '#b96c46', '#cf8758', '#dd9c69', '#e8b282']
+  const n = (px: number, py: number, s = 0) => noise(px, py, s)
   for (let py = cy - ry - P; py <= cy + ry; py++)
     for (let px = cx - rx; px <= cx + rx; px++) {
       const top = at(px, py + P)
@@ -269,14 +281,18 @@ export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P
         const [du, dv] = top
         const edge = !at(px, py + P - 1) || !at(px - 1, py + P) || !at(px + 1, py + P)
         const ring = Math.abs(du) > w / 2 - inset - 0.08 || Math.abs(dv) > h / 2 - inset - 0.08
+        // how far out toward the rim (0 centre, 1 edge): dust drifts in from there
+        const rim = Math.max(Math.abs(du) / (w / 2), Math.abs(dv) / (h / 2))
+        const drift = (rim - 0.55) * 2.2 + (n(px >> 1, py, 3) - 0.5) * 0.9
         let c: string
-        if (edge) c = M[4]
-        else if (ring) c = du + dv < 0 ? trim[3] : trim[2]
+        if (edge) c = n(px, py, 4) < 0.5 ? DUST[4] : PAD[4]
+        else if (ringOn && ring && drift < 0.9) c = du + dv < 0 ? trim[3] : trim[2]
+        else if (drift > 0.35) c = tone(DUST, 0.55 + (n(px, py, 5) - 0.5) * 0.5 - (du + dv) * 0.05, px, py)
         else {
-          // slab joints every tile, and red dust drifting in from the rim
-          const joint = Math.abs(((du + w / 2) % 1) - 0.5) > 0.47 || Math.abs(((dv + h / 2) % 1) - 0.5) > 0.47
-          const rim = Math.max(Math.abs(du) / (w / 2), Math.abs(dv) / (h / 2))
-          c = joint ? M[2] : rim > 0.8 && (px * 7 + py * 3) % 5 === 0 ? RAMP.regolith[3] : tone(M, 0.7 - (du + dv) * 0.04, px, py)
+          // faint slab joints, a few cracks and pebbles, light falling off to the front right
+          const joint = Math.abs(((du + w / 2) % 1) - 0.5) > 0.475 || Math.abs(((dv + h / 2) % 1) - 0.5) > 0.475
+          const grit = n(px, py, 6)
+          c = joint && grit > 0.25 ? PAD[1] : grit < 0.04 ? PAD[1] : grit > 0.97 ? PAD[4] : tone(PAD, 0.62 - (du + dv) * 0.05 + (n(px >> 2, py >> 1, 7) - 0.5) * 0.18, px, py)
         }
         rect(ctx, px, py, 1, 1, c)
         continue
@@ -285,16 +301,16 @@ export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P
         const g = at(px, py + z)
         if (!g) continue
         const left = px < frontX
-        const s = left ? g[0] : g[1]
-        const f = (((s + 20) % 0.5) + 0.5) % 0.5 / 0.5
-        const hz = z / (P - 1)
-        const frame = z === 0 || z === P - 1 || f < 0.07 || f > 0.93
-        const diag = Math.abs(f - hz) < 0.14 || Math.abs(1 - f - hz) < 0.14
-        let c: string
-        if (frame) c = left ? M[3] : M[2]
-        else if (diag) c = left ? M[2] : M[1]
-        else c = left ? M[1] : M[0]
-        if (z === P - 1 && (f < 0.07 || f > 0.93)) c = left ? trim[3] : trim[1]
+        // packed dirt: lit on the left face, in shade on the right; uneven strata
+        // and pebbles, and the foot fading into loose sand like the ground around it
+        const hz = z / Math.max(1, P - 1) // 0 at the top lip, 1 at the ground
+        const strata = Math.sin((py + z * 0.5 + n(px >> 2, 0, 8) * 3) * 1.3) * 0.08
+        let v = (left ? 0.62 : 0.38) - hz * 0.1 + strata + (n(px >> 1, py, 9) - 0.5) * 0.12
+        if (z === 0) v += 0.18 // the lip catches the light
+        let c = tone(DIRT, v, px, py)
+        if (hz > 0.55 && n(px, py, 10) < (hz - 0.45) * 1.4) c = tone(DUST, left ? 0.6 : 0.35, px, py)
+        if (n(px, py, 11) > 0.985) c = left ? DIRT[1] : DIRT[0]
+        if (ringOn && z === 0 && (n(px >> 1, 0, 12) > 0.5)) c = left ? trim[3] : trim[1]
         rect(ctx, px, py, 1, 1, c)
         break
       }
@@ -309,6 +325,34 @@ export function plinth(ctx: Ctx, cx: number, cy: number, w: number, h: number, P
     }
   }
   return cy - P
+}
+
+/**
+ * Loose dust spilling from a pad's front edges onto the ground. Drawn over the
+ * finished sprite (after the outline), so the specks stay soft.
+ */
+export function dustApron(ctx: Ctx, cx: number, cy: number, w: number, h: number) {
+  const DUST: Ramp = ['#a1593a', '#b96c46', '#cf8758', '#dd9c69', '#e8b282']
+  const inset = 0.06
+  const rx = (w + h) * 8 + 1
+  const ry = (w + h) * 4 + 2
+  const inside = (px: number, py: number) => {
+    const dx = px + 0.5 - cx
+    const dy = py + 0.5 - cy
+    const du = (dx / 16 + dy / 8) / 2
+    const dv = (dy / 8 - dx / 16) / 2
+    return Math.abs(du) <= w / 2 - inset && Math.abs(dv) <= h / 2 - inset
+  }
+  for (let px = cx - rx; px <= cx + rx; px++) {
+    let bottom = -1
+    for (let py = cy + ry; py >= cy - ry; py--)
+      if (inside(px, py)) {
+        bottom = py
+        break
+      }
+    if (bottom < 0) continue
+    for (let k = 1; k <= 3; k++) if (noise(px, bottom + k, 13) < 0.6 - k * 0.17) rect(ctx, px, bottom + k, 1, 1, tone(DUST, 0.7 - k * 0.08, px, bottom + k))
+  }
 }
 
 /** A round fan grille with spinning blades, seen face-on. */

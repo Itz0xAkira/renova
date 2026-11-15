@@ -10,13 +10,13 @@
  */
 import { box, C, diamond, diamondOutline, ellipseRows, rect, walker, type Ctx } from '@/site/pixel/engine'
 import { BUILDINGS, ITEMS, type Dir, type ItemId, type Kind } from '@/game/core/data'
-import { setTier } from '@/game/art/pixel'
+import { dustApron, setTier } from '@/game/art/pixel'
 import { battery, berm, bigGreenhouse, bigHabitat, bigKiln, bigLab, bigReactor, bigSmelter, bigWasher, coreBuilding, excavator, iceDrill, melter, moxie, pylon, rocket, solarArray, upgradeKit } from '@/game/art/structures'
 import { canvas, FRAMES, line } from '@/game/art/canvas'
 
 export { FRAMES } from '@/game/art/canvas'
 import { arrowCanvas, bayCanvas, beltCanvas, beltKey, itemCanvas, junctionCanvas, PORT_AX, PORT_AY, PORT_H, PORT_W, portCanvas, roadCanvas } from '@/game/art/logistics'
-import { lit, outlineOf, shadeLayer, shadowOf } from '@/game/art/passes'
+import { lit, outlineOf, shadeLayer, shadowOf, weatherLayer } from '@/game/art/passes'
 import { beaconCanvas, beamCanvas, dustCanvas, ROVER_H, ROVER_W, ROVER_WHEEL_FRAMES, roverCanvas, roverShadowCanvas } from '@/game/art/rovers'
 
 export { beltKey, PORT_AX, PORT_AY, PORT_H, PORT_W } from '@/game/art/logistics'
@@ -141,6 +141,9 @@ function iconCanvas(name: string) {
 /* -------------------------------- baking -------------------------------- */
 
 
+/** Buildings that stand on a regolith pad (all but the pylon), so loose dust spills off its edges. */
+const PADDED = new Set<Kind>(['core', 'drill', 'excavator', 'melter', 'smelter', 'kiln', 'washer', 'greenhouse', 'moxie', 'habitat', 'shield', 'solar', 'battery', 'reactor', 'lab'])
+
 /** The bare structure: lit, no slab, no outline. */
 function structure(kind: Kind, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
   const big = isBig(kind)
@@ -166,11 +169,12 @@ function structure(kind: Kind, t: number, opt: { dim?: boolean; level?: number; 
 
 /** A finished building sprite: dark outline plus the lit structure. Slab and shadow live on the ground layer. */
 function buildingCanvas(kind: Kind, t: number, opt: { dim?: boolean; level?: number; tier?: number } = {}) {
-  const { W, H } = spriteSpec(kind)
+  const { W, H, ax, ay } = spriteSpec(kind)
   const layer = structure(kind, t, opt)
   return canvas(W, H, (ctx) => {
     ctx.drawImage(outlineOf(layer), 0, 0)
     ctx.drawImage(layer, 0, 0)
+    if (PADDED.has(kind)) dustApron(ctx, ax, ay, BUILDINGS[kind].w, BUILDINGS[kind].h)
   })
 }
 
@@ -272,7 +276,7 @@ export function bakeAll(add: TextureSink) {
   for (const d of [0, 1, 2, 3] as Dir[]) {
     for (const loaded of [false, true])
       for (let f = 0; f < ROVER_WHEEL_FRAMES; f++) {
-        const body = roverCanvas(d, f, loaded)
+        const body = weatherLayer(roverCanvas(d, f, loaded))
         add(roverKey(d, f, loaded), canvas(ROVER_W, ROVER_H, (ctx) => (ctx.drawImage(outlineOf(body), 0, 0), ctx.drawImage(body, 0, 0))))
       }
     add(`rover_sh_${d}`, roverShadowCanvas(d))
