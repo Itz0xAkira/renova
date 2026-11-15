@@ -309,7 +309,7 @@ function chapters(art: Art, sun: string, minutes: number): Chapter[] {
               ['Top right', 'Pause, game speed 1× 2× 3×, research progress, this guide and the menu.'],
               ['Left', 'The mission log: your current goal, a progress bar, a tip, and the latest colony messages.'],
               ['Right', 'The inspector: click any building to see what it is doing, what it holds, its power use and its upgrade.'],
-              ['Bottom', 'The build bar, grouped by category, with each building’s cost and hotkey. Hover a card to read about it.'],
+              ['Bottom', 'The build bar: six colour-coded categories. Click one to open its tray of buildings, with each one’s cost and hotkey; click it again (or press Esc) to close. Hover a card to read about it.'],
             ]}
           />
           <Tip>Click the power readout in the top bar to open the power panel, with a graph of the last few sols.</Tip>
@@ -322,7 +322,7 @@ function chapters(art: Art, sun: string, minutes: number): Chapter[] {
       body: (
         <>
           <P>
-            Pick a building from the bar at the bottom, or press its number key. A see-through <B>ghost</B> follows your cursor, with its <B>footprint</B> outlined on the ground: green if it fits, red if it doesn’t, with the reason next to the cursor. <B>Click</B> to build.
+            Open a category in the bar at the bottom and pick a building, or press its number key. A see-through <B>ghost</B> follows your cursor, with its <B>footprint</B> outlined on the ground: green if it fits, red if it doesn’t, with the reason next to the cursor. <B>Click</B> to build.
           </P>
           <H>Sizes</H>
           <P>

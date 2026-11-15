@@ -32,14 +32,17 @@ export const STATUS: Record<Status, [string, string]> = {
   badground: ['Wrong ground', 'bg-[#D86B7B]'],
 }
 
-export const CATEGORY: { id: BuildingDef['group']; name: string; icon: IconName }[] = [
-  { id: 'logistics', name: 'Logistics', icon: 'logistics' },
-  { id: 'extract', name: 'Mining', icon: 'extract' },
-  { id: 'process', name: 'Processing', icon: 'process' },
-  { id: 'life', name: 'Life support', icon: 'life' },
-  { id: 'power', name: 'Power', icon: 'power' },
-  { id: 'science', name: 'Science', icon: 'science' },
+/** Build categories, each with its own colour so a building's job reads at a glance. */
+export const CATEGORY: { id: BuildingDef['group']; name: string; icon: IconName; color: string; blurb: string }[] = [
+  { id: 'logistics', name: 'Logistics', icon: 'logistics', color: '#F2B33D', blurb: 'Belts and junctions move things around' },
+  { id: 'extract', name: 'Mining', icon: 'extract', color: '#E0703F', blurb: 'Dig ice and rock out of the ground' },
+  { id: 'process', name: 'Processing', icon: 'process', color: '#B784E0', blurb: 'Turn raw rock and ice into useful stuff' },
+  { id: 'life', name: 'Life support', icon: 'life', color: '#7FC86A', blurb: 'Air, water, food and shelter for the crew' },
+  { id: 'power', name: 'Power', icon: 'power', color: '#65C9E8', blurb: 'Make electricity and carry it to buildings' },
+  { id: 'science', name: 'Science', icon: 'science', color: '#7D93F2', blurb: 'Study Mars and unlock new tech' },
 ]
+
+export const categoryOf = (g: BuildingDef['group']) => CATEGORY.find((c) => c.id === g)!
 
 export function Icon({ name, size = 24, className = '' }: { name: IconName; size?: number; className?: string }) {
   // eslint-disable-next-line @next/next/no-img-element

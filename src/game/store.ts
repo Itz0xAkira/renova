@@ -3,7 +3,7 @@
  * Phaser mutates the sim every frame; React re-reads it when `version` bumps.
  * All UI actions go through here so the HUD, the keyboard and the scene agree.
  */
-import { type Dir, type Kind } from '@/game/core/data'
+import { BUILDINGS, type BuildingDef, type Dir, type Kind } from '@/game/core/data'
 import { OutdatedSaveError, Sim, type Ent, type SaveData } from '@/game/core/sim'
 import { fetchRecentFlares, type FlareRecord } from '@/game/core/nasa'
 import { earthMarsKm, lightMinutes, sunAngle } from '@/game/core/orbits'
@@ -30,6 +30,8 @@ export type UIState = {
   pointer: [number, number] | null
   /** Power view: grid coverage and unconnected buildings (key P). */
   powerView: boolean
+  /** Which build-bar category tray is open, if any. */
+  drawer: BuildingDef['group'] | null
   /**
    * True while a panel, popup or the guide covers the map. The scene must
    * ignore world input (keyboard panning, placing, hover) while it is set.
@@ -51,6 +53,7 @@ const freshUI = (zoom = 3): UIState => ({
   zoom,
   pointer: null,
   powerView: false,
+  drawer: null,
   inputBlocked: false,
 })
 
@@ -138,7 +141,16 @@ export class GameStore {
   setTool(k: Kind | null) {
     if (k && (!this.sim.unlocked(k) || k === 'core')) return
     this.ui.tool = this.ui.tool === k ? null : k
-    if (this.ui.tool) this.ui.selected = null
+    if (this.ui.tool) {
+      this.ui.selected = null
+      this.ui.drawer = BUILDINGS[this.ui.tool].group // a hotkey opens the tray it belongs to
+    }
+    this.bump()
+  }
+
+  /** Open a build-bar category tray, or close it if it's already open. */
+  toggleDrawer(g: BuildingDef['group']) {
+    this.ui.drawer = this.ui.drawer === g ? null : g
     this.bump()
   }
 
@@ -172,6 +184,7 @@ export class GameStore {
       this.ui.panel = null
       this.firstRun = false
     } else if (this.ui.tool) this.ui.tool = null
+    else if (this.ui.drawer) this.ui.drawer = null
     else if (this.ui.selected) this.ui.selected = null
     else this.ui.panel = 'menu'
     this.bump()

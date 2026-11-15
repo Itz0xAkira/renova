@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { BUILD_ORDER, BUILDINGS, HOTKEYS, RESEARCH, type BuildingDef, type Kind } from '@/game/core/data'
 import type { GameStore } from '@/game/store'
-import { btn, btnOn, CATEGORY, Cost, Icon, panel, Recipe, TONE } from './kit'
+import { btn, btnOn, CATEGORY, categoryOf, Cost, Icon, panel, Recipe, TONE } from './kit'
 
 /** The build bar, grouped by category, and the info card for the building being hovered or placed. */
 
@@ -11,10 +11,14 @@ export function BuildCard({ store, def }: { store: GameStore; def: BuildingDef }
   const { sim, ui } = store
   const dirs = ['↘', '↙', '↖', '↗']
   const locked = !sim.unlocked(def.kind)
+  const cat = categoryOf(def.group)
   return (
-    <div className={`${panel} max-w-xl border-t-2 border-t-[#C8754D] p-2.5`}>
+    <div className={`${panel} max-w-xl p-2.5`} style={{ borderTop: `2px solid ${cat.color}` }}>
       <p className="flex flex-wrap items-center gap-2 text-sm text-white">
         {def.name}
+        <span className="px-1 text-[10px]" style={{ color: cat.color, border: `1px solid ${cat.color}80` }}>
+          {cat.name}
+        </span>
         <span className="border border-[#3F4246] px-1 text-[10px] text-[#8A8A8A]">
           {def.w}×{def.h}
         </span>
@@ -53,12 +57,94 @@ export function BuildCard({ store, def }: { store: GameStore; def: BuildingDef }
   )
 }
 
+/** The tray of buildings that opens above a category tab, tinted in that category's colour. */
+function Tray({ store, thumbs, cat, onPeek }: { store: GameStore; thumbs: Record<Kind, string>; cat: (typeof CATEGORY)[number]; onPeek: (k: Kind | null) => void }) {
+  const { sim, ui } = store
+  const kinds = BUILD_ORDER.filter((k) => BUILDINGS[k].group === cat.id)
+  return (
+    <div
+      id="build-tray"
+      role="toolbar"
+      aria-label={`${cat.name} buildings`}
+      className={`${panel} max-w-full overflow-x-auto motion-safe:animate-[rise_160ms_ease-out]`}
+      style={{ borderTop: `3px solid ${cat.color}` }}
+    >
+      <p className="flex items-center gap-2 px-2.5 pt-1.5 text-[11px]">
+        <span style={{ color: cat.color }}>{cat.name}</span>
+        <span className="hidden font-sans normal-case text-[#8A8A8A] sm:inline">{cat.blurb}</span>
+        <button type="button" onClick={() => store.toggleDrawer(cat.id)} className="ml-auto px-1 text-[#8A8A8A] hover:text-white" aria-label={`Close ${cat.name}`}>
+          ✕
+        </button>
+      </p>
+      <div className="flex gap-1.5 p-1.5">
+        {kinds.map((k) => {
+          const d = BUILDINGS[k]
+          const locked = !sim.unlocked(k)
+          const poor = !sim.affordable(k)
+          const sel = ui.tool === k
+          return (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={sel}
+              aria-label={d.name}
+              aria-disabled={locked}
+              title={locked ? `${d.name} · locked` : `${d.name}${HOTKEYS[k] ? ` · ${HOTKEYS[k]}` : ''}`}
+              onClick={() => !locked && store.setTool(k)}
+              onMouseEnter={() => onPeek(k)}
+              onMouseLeave={() => onPeek(null)}
+              onFocus={() => onPeek(k)}
+              onBlur={() => onPeek(null)}
+              className={`relative flex w-[6.2rem] shrink-0 flex-col items-center border px-1 pb-1 pt-0.5 transition-colors hover:brightness-125 ${locked ? 'cursor-not-allowed opacity-40' : ''}`}
+              style={{
+                borderColor: sel ? cat.color : '#3F4246',
+                background: sel ? `${cat.color}40` : `linear-gradient(to bottom, #2E3033 70%, ${cat.color}22)`,
+                boxShadow: sel ? `inset 0 0 0 1px ${cat.color}` : `inset 0 -2px 0 ${cat.color}99`,
+              }}
+            >
+              {HOTKEYS[k] && <span className="absolute left-1 top-0.5 text-[10px] text-[#BFBFBF]">{HOTKEYS[k]}</span>}
+              {(d.w > 1 || d.h > 1) && (
+                <span className="absolute right-0.5 top-0.5 bg-[#151618] px-0.5 text-[9px]" style={{ color: cat.color }}>
+                  {d.w}×{d.h}
+                </span>
+              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={thumbs[k]} alt="" width={40} height={48} className="pixelated h-[4.5rem] w-[3.75rem]" />
+              <span className="text-[11px] leading-tight text-white">{d.short}</span>
+              <span className="mt-0.5 text-[10px] leading-none">{locked ? <Icon name="lock" size={13} /> : <Cost def={d} poor={poor} />}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<Kind, string> }) {
   const { sim, ui } = store
   const [peek, setPeek] = useState<Kind | null>(null)
   const show = peek ?? ui.tool
+  const open = ui.drawer ? categoryOf(ui.drawer) : null
+  // the tray opens right above its tab, kept on screen
+  const root = useRef<HTMLDivElement>(null)
+  const tray = useRef<HTMLDivElement>(null)
+  const tabs = useRef<Partial<Record<string, HTMLButtonElement | null>>>({})
+  const [trayLeft, setTrayLeft] = useState(0)
+  useLayoutEffect(() => {
+    const place = () => {
+      const tab = ui.drawer && tabs.current[ui.drawer]
+      if (!tab || !root.current || !tray.current) return
+      const box = root.current.getBoundingClientRect()
+      const t = tab.getBoundingClientRect()
+      const w = tray.current.offsetWidth
+      setTrayLeft(Math.max(0, Math.min(box.width - w, t.left - box.left + t.width / 2 - w / 2)))
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [ui.drawer])
   return (
-    <div className="pointer-events-auto flex flex-col gap-1.5">
+    <div ref={root} className="pointer-events-auto flex flex-col gap-1.5">
       <div className="flex flex-wrap items-end justify-between gap-1.5">
         {show ? (
           <BuildCard store={store} def={BUILDINGS[show]} />
@@ -80,53 +166,45 @@ export function BottomBar({ store, thumbs }: { store: GameStore; thumbs: Record<
           </button>
         </div>
       </div>
-      <div className={`${panel} flex items-stretch gap-0 overflow-x-auto border-t-2 border-t-[#A95738]`} role="toolbar" aria-label="Build">
+      {open && (
+        <div ref={tray} className="max-w-full self-start" style={{ marginLeft: trayLeft }}>
+          <Tray store={store} thumbs={thumbs} cat={open} onPeek={setPeek} />
+        </div>
+      )}
+      <div className={`${panel} flex items-stretch overflow-x-auto`} role="toolbar" aria-label="Build categories">
         {CATEGORY.map((cat) => {
           const kinds = BUILD_ORDER.filter((k) => BUILDINGS[k].group === cat.id)
           if (!kinds.length) return null
+          const isOpen = ui.drawer === cat.id
+          const ready = kinds.filter((k) => sim.unlocked(k)).length
+          const holding = ui.tool && BUILDINGS[ui.tool].group === cat.id ? BUILDINGS[ui.tool] : null
           return (
-            <div key={cat.id} className="flex flex-col border-r border-[#3F4246] last:border-r-0">
-              <p className="flex items-center gap-1 px-1.5 pt-1 text-[10px] text-[#8A8A8A]">
-                <Icon name={cat.icon} size={13} /> {cat.name}
-              </p>
-              <div className="flex gap-1 p-1">
-                {kinds.map((k) => {
-                  const d = BUILDINGS[k]
-                  const locked = !sim.unlocked(k)
-                  const poor = !sim.affordable(k)
-                  const sel = ui.tool === k
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      aria-pressed={sel}
-                      aria-label={d.name}
-                      aria-disabled={locked}
-                      title={locked ? `${d.name} · locked` : `${d.name}${HOTKEYS[k] ? ` · ${HOTKEYS[k]}` : ''}`}
-                      onClick={() => !locked && store.setTool(k)}
-                      onMouseEnter={() => setPeek(k)}
-                      onMouseLeave={() => setPeek(null)}
-                      onFocus={() => setPeek(k)}
-                      onBlur={() => setPeek(null)}
-                      className={`relative flex w-[5.6rem] shrink-0 flex-col items-center border px-1 pb-1 pt-0.5 transition-colors ${
-                        sel ? 'border-[#C8754D] bg-[#A95738]/30 shadow-[inset_0_0_0_1px_#D58B59]' : 'border-[#3F4246] bg-[#2E3033] hover:border-[#8A8A8A]'
-                      } ${locked ? 'cursor-not-allowed opacity-40' : ''}`}
-                    >
-                      {HOTKEYS[k] && <span className="absolute left-1 top-0.5 text-[10px] text-[#8A8A8A]">{HOTKEYS[k]}</span>}
-                      {(d.w > 1 || d.h > 1) && (
-                        <span className="absolute right-0.5 top-0.5 bg-[#151618] px-0.5 text-[9px] text-[#65C9E8]">
-                          {d.w}×{d.h}
-                        </span>
-                      )}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={thumbs[k]} alt="" width={40} height={48} className="pixelated h-16 w-[3.35rem]" />
-                      <span className="text-[11px] leading-tight text-white">{d.short}</span>
-                      <span className="mt-0.5 text-[10px] leading-none">{locked ? <Icon name="lock" size={13} /> : <Cost def={d} poor={poor} />}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+            <button
+              key={cat.id}
+              ref={(el) => {
+                tabs.current[cat.id] = el
+              }}
+              type="button"
+              aria-expanded={isOpen}
+              aria-controls="build-tray"
+              onClick={() => store.toggleDrawer(cat.id)}
+              title={`${cat.name}: ${cat.blurb}`}
+              className="group relative flex min-w-[7rem] flex-1 sm:min-w-[8.5rem] items-center gap-2 border-r border-[#3F4246] px-2.5 py-2 text-left transition-colors last:border-r-0 hover:bg-white/5"
+              style={{ boxShadow: `inset 0 ${isOpen ? 4 : 3}px 0 ${cat.color}`, background: isOpen ? `${cat.color}2E` : undefined }}
+            >
+              <span className="flex size-9 shrink-0 items-center justify-center border" style={{ borderColor: cat.color, background: `${cat.color}26` }}>
+                <Icon name={cat.icon} size={22} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] leading-tight text-white">{cat.name}</span>
+                <span className="block truncate text-[10px] leading-tight" style={{ color: holding ? cat.color : '#8A8A8A' }}>
+                  {holding ? `● ${holding.short}` : ready ? `${ready} of ${kinds.length} ready` : 'Locked · research it'}
+                </span>
+              </span>
+              <span className="text-[11px] transition-transform" style={{ color: cat.color, transform: isOpen ? 'rotate(180deg)' : undefined }} aria-hidden>
+                ▲
+              </span>
+            </button>
           )
         })}
       </div>

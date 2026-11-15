@@ -92,6 +92,10 @@ export default function GameRoot() {
       <div
         ref={host}
         className="absolute inset-0"
+        // the map never takes focus itself, so hand it back from whichever HUD button had it: keys then reach the game again
+        onPointerDownCapture={() => {
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+        }}
         role="application"
         aria-label="RENOVA colony map"
       />
